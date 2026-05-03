@@ -29,8 +29,8 @@ struct ForceDirectedLayout: LayoutStrategy {
 
             // Repulsion using inverse-square (Coulomb-style). Falls off fast with
             // distance so each node mainly feels its neighbors, not the whole graph
-            // — this is what gives the layout an organic Obsidian-like spread
-            // instead of every node piling on a perimeter circle.
+            // — that's what gives the layout a loose organic cluster instead of
+            // every node piling on a perimeter circle.
             for i in 0..<nodeCount {
                 let nodeI = graph.nodes[i]
                 guard let posI = positions[nodeI.id] else { continue }

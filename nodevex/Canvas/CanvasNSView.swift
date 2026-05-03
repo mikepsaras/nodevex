@@ -10,6 +10,7 @@ final class CanvasNSView: NSView {
     private var lastGraphSignature: Int?
 
     var onSelectionChange: ((Set<UUID>) -> Void)?
+    var onNodeFocus: ((UUID) -> Void)?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -50,6 +51,14 @@ final class CanvasNSView: NSView {
             x: pointInView.x - bounds.midX,
             y: pointInView.y - bounds.midY
         )
+
+        // Double-click on a node opens the focus modal. Selection from the prior
+        // single-click is fine to leave in place; the modal sits on top of it.
+        if event.clickCount == 2, let hitID = findNodeID(at: canvasPoint) {
+            onNodeFocus?(hitID)
+            return
+        }
+
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
@@ -77,8 +86,6 @@ final class CanvasNSView: NSView {
     }
 
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
-        // Hit area is generous (16) compared to visual radius (7) so small targets
-        // are easy to click. Match CGCanvasRenderer's nodeRadius if updated.
         let hitRadius: CGFloat = 16
         let hitRadiusSquared = hitRadius * hitRadius
         for node in graph.nodes.reversed() {

@@ -4,6 +4,7 @@ import AppKit
 
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
+    var onNodeFocus: (UUID) -> Void
     @Query private var nodes: [Node]
 
     func makeCoordinator() -> Coordinator {
@@ -24,6 +25,9 @@ struct CanvasView: NSViewRepresentable {
         let canvas = CanvasNSView()
         canvas.onSelectionChange = { [weak coordinator = context.coordinator] newSelection in
             coordinator?.parent.selectedNodeIDs = newSelection
+        }
+        canvas.onNodeFocus = { [weak coordinator = context.coordinator] nodeID in
+            coordinator?.parent.onNodeFocus(nodeID)
         }
         scrollView.documentView = canvas
 
@@ -105,15 +109,10 @@ final class CanvasScrollView: NSScrollView {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true
         }
-        // contentView.frame.size is in scroll-view coordinates (mag-independent).
-        // contentView.bounds.size is in document coordinates and scales inversely with
-        // magnification, which creates a feedback loop in tile() — do not use it here.
         let viewportSize = contentView.frame.size
         guard viewportSize.width > 0, viewportSize.height > 0 else { return }
         let widthRatio = viewportSize.width / canvasSize.width
         let heightRatio = viewportSize.height / canvasSize.height
-        // max() ensures canvas fills viewport in the larger-ratio dimension at min zoom
-        // (no empty space / visible canvas borders); user pans the smaller dimension.
         let computedMin = min(max(widthRatio, heightRatio), 1.0)
         let oldMin = minMagnification
         if abs(minMagnification - computedMin) > 0.01 {

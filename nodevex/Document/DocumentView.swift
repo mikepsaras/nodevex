@@ -6,6 +6,12 @@ struct DocumentView: View {
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @State private var pendingFocusNodeID: UUID?
     @State private var selectedNodeIDs: Set<UUID> = []
+    @State private var focusedNodeID: UUID?
+
+    private var focusedNode: Node? {
+        guard let focusedNodeID else { return nil }
+        return nodes.first(where: { $0.id == focusedNodeID })
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -15,18 +21,26 @@ struct DocumentView: View {
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
-            CanvasView(selectedNodeIDs: $selectedNodeIDs)
-                .overlay(alignment: .bottomLeading) {
-                    CanvasFooter()
-                        .padding(12)
+            CanvasView(
+                selectedNodeIDs: $selectedNodeIDs,
+                onNodeFocus: { focusedNodeID = $0 }
+            )
+            .overlay(alignment: .bottomLeading) {
+                CanvasFooter()
+                    .padding(12)
+            }
+            .overlay {
+                if nodes.isEmpty {
+                    EmptyStateCTA(onCreate: createNewNode)
                 }
-                .overlay {
-                    if nodes.isEmpty {
-                        EmptyStateCTA(onCreate: createNewNode)
-                    }
-                }
+            }
         }
         .navigationTitle("NodeVex")
+        .overlay {
+            if let focusedNode {
+                NodeFocusView(node: focusedNode, onDismiss: { focusedNodeID = nil })
+            }
+        }
     }
 
     private func createNewNode() {
