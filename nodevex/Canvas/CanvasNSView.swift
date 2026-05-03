@@ -103,6 +103,11 @@ final class CanvasNSView: NSView {
         var hasher = Hasher()
         for node in graph.nodes {
             hasher.combine(node.id)
+            // Category memberships are part of the layout's clustering force, so
+            // a (un)assignment must invalidate the cache and rerun the simulation.
+            for category in node.categories {
+                hasher.combine(category.id)
+            }
         }
         for edge in graph.edges {
             hasher.combine(edge.id)

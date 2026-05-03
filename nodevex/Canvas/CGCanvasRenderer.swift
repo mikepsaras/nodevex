@@ -113,9 +113,7 @@ struct CGCanvasRenderer: CanvasRenderer {
             height: radius * 2
         )
 
-        let fill = isSelected
-            ? NSColor.controlAccentColor
-            : NSColor.secondaryLabelColor
+        let fill = nodeFillColor(for: node, isSelected: isSelected)
         context.setFillColor(fill.cgColor)
         context.fillEllipse(in: circleRect)
 
@@ -124,6 +122,18 @@ struct CGCanvasRenderer: CanvasRenderer {
         context.strokeEllipse(in: circleRect)
 
         drawLabel(node.name, below: point, radius: radius, isSelected: isSelected)
+    }
+
+    private func nodeFillColor(for node: Node, isSelected: Bool) -> NSColor {
+        if isSelected {
+            return .controlAccentColor
+        }
+        // First-assigned category wins for fill color; uncategorized falls back
+        // to the neutral secondary label gray.
+        if let firstCategory = node.categories.first {
+            return firstCategory.nsDisplayColor
+        }
+        return .secondaryLabelColor
     }
 
     private func drawLabel(_ text: String, below point: CGPoint, radius: CGFloat, isSelected: Bool) {

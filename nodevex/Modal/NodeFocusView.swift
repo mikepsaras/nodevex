@@ -2,12 +2,13 @@ import SwiftUI
 import SwiftData
 
 struct NodeFocusView: View {
-    let node: Node
+    @Bindable var node: Node
     let onDismiss: () -> Void
 
     @Environment(\.modelContext) private var modelContext
     @Query private var allEdges: [Edge]
     @Query private var allNodes: [Node]
+    @Query private var allCategories: [Category]
 
     @State private var creationContext: EdgeCreationContext?
 
@@ -48,6 +49,7 @@ struct NodeFocusView: View {
                     )
                 } else {
                     header
+                    categoriesSection
                     EdgeSection(
                         title: "Causes",
                         addLabel: "Add cause",
@@ -94,6 +96,64 @@ struct NodeFocusView: View {
         }
     }
 
+    private var categoriesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Categories")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .textCase(.uppercase)
+                .foregroundStyle(SemanticColors.textSecondary)
+
+            if node.categories.isEmpty {
+                Text("Uncategorized")
+                    .font(.callout)
+                    .foregroundStyle(SemanticColors.textSecondary)
+                    .padding(.leading, 4)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(node.categories) { category in
+                        CategoryAssignmentRow(category: category, onRemove: {
+                            CategoryCommands.toggleAssignment(node: node, category: category)
+                        })
+                    }
+                }
+            }
+
+            addCategoryMenu
+        }
+    }
+
+    private var addCategoryMenu: some View {
+        let unassigned = allCategories.filter { cat in
+            !node.categories.contains(where: { $0.id == cat.id })
+        }
+        return Menu {
+            if unassigned.isEmpty {
+                Text("No categories available")
+            } else {
+                ForEach(unassigned) { category in
+                    Button {
+                        CategoryCommands.toggleAssignment(node: node, category: category)
+                    } label: {
+                        Label {
+                            Text(category.name)
+                        } icon: {
+                            Circle().fill(category.displayColor)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Add to category", systemImage: "plus")
+                .font(.callout)
+        }
+        .menuStyle(.borderlessButton)
+        .foregroundStyle(.tint)
+        .fixedSize()
+        .padding(.leading, 4)
+        .padding(.top, 4)
+    }
+
     private func createEdge(
         direction: EdgeCreationContext.Direction,
         otherID: UUID,
@@ -102,7 +162,6 @@ struct NodeFocusView: View {
     ) {
         switch direction {
         case .cause:
-            // Cause: edge points FROM other INTO this node.
             EdgeCommands.createEdge(
                 from: otherID,
                 to: node.id,
@@ -111,7 +170,6 @@ struct NodeFocusView: View {
                 in: modelContext
             )
         case .effect:
-            // Effect: edge points FROM this node INTO other.
             EdgeCommands.createEdge(
                 from: node.id,
                 to: otherID,
@@ -126,6 +184,32 @@ struct NodeFocusView: View {
 struct EdgeCreationContext: Equatable {
     enum Direction { case cause, effect }
     let direction: Direction
+}
+
+private struct CategoryAssignmentRow: View {
+    let category: Category
+    let onRemove: () -> Void
+
+    @State private var isHoveringRemove = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(category.displayColor)
+                .frame(width: 10, height: 10)
+            Text(category.name)
+                .foregroundStyle(SemanticColors.textPrimary)
+            Spacer()
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(isHoveringRemove ? Color.red : SemanticColors.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringRemove = $0 }
+            .help("Remove from category")
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 private struct EdgeSection: View {

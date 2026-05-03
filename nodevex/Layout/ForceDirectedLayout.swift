@@ -9,6 +9,7 @@ struct ForceDirectedLayout: LayoutStrategy {
     private let minRepulsionDistance: CGFloat = 25
     private let idealEdgeLength: CGFloat = 100
     private let gravityStrength: CGFloat = 0.15
+    private let categoryClusterStrength: CGFloat = 0.08
     private let initialTemperature: CGFloat = 50
     private let coolingFactor: CGFloat = 0.93
     private let safetyRadius: CGFloat = 600
@@ -21,16 +22,20 @@ struct ForceDirectedLayout: LayoutStrategy {
         var positions = seedPositions(graph: graph, previousPositions: previousPositions)
         var temperature = initialTemperature
 
+        // Precompute category memberships for fast intersection checks per iteration.
+        let nodeCategoryIDs: [UUID: Set<UUID>] = Dictionary(
+            uniqueKeysWithValues: graph.nodes.map { node in
+                (node.id, Set(node.categories.map { $0.id }))
+            }
+        )
+
         for _ in 0..<iterations {
             var displacements: [UUID: CGPoint] = [:]
             for node in graph.nodes {
                 displacements[node.id] = .zero
             }
 
-            // Repulsion using inverse-square (Coulomb-style). Falls off fast with
-            // distance so each node mainly feels its neighbors, not the whole graph
-            // — that's what gives the layout a loose organic cluster instead of
-            // every node piling on a perimeter circle.
+            // Repulsion (inverse-square so each node mainly feels its neighbors).
             for i in 0..<nodeCount {
                 let nodeI = graph.nodes[i]
                 guard let posI = positions[nodeI.id] else { continue }
@@ -40,8 +45,6 @@ struct ForceDirectedLayout: LayoutStrategy {
                     let dx = posI.x - posJ.x
                     let dy = posI.y - posJ.y
                     let trueDistance = max(sqrt(dx * dx + dy * dy), 1)
-                    // Floor the distance used in the force calc so very-close pairs
-                    // don't blow up; they still move apart but don't oscillate wildly.
                     let distance = max(trueDistance, minRepulsionDistance)
                     let force = repulsionConstant / (distance * distance)
                     let unitX = dx / trueDistance
@@ -53,7 +56,7 @@ struct ForceDirectedLayout: LayoutStrategy {
                 }
             }
 
-            // Attraction (edges as springs).
+            // Attraction — edges as springs.
             for edge in graph.edges {
                 guard let posU = positions[edge.sourceID],
                       let posV = positions[edge.targetID] else { continue }
@@ -67,6 +70,31 @@ struct ForceDirectedLayout: LayoutStrategy {
                 displacements[edge.sourceID]?.y -= unitY * force
                 displacements[edge.targetID]?.x += unitX * force
                 displacements[edge.targetID]?.y += unitY * force
+            }
+
+            // Category clustering — nodes that share at least one category attract
+            // each other with a gentle Hooke-style force, so categorized clusters
+            // separate from the rest of the graph (per ADR-0019 / ADR-0023).
+            for i in 0..<nodeCount {
+                let nodeI = graph.nodes[i]
+                guard let categoriesI = nodeCategoryIDs[nodeI.id], !categoriesI.isEmpty else { continue }
+                guard let posI = positions[nodeI.id] else { continue }
+                for j in (i + 1)..<nodeCount {
+                    let nodeJ = graph.nodes[j]
+                    guard let categoriesJ = nodeCategoryIDs[nodeJ.id], !categoriesJ.isEmpty else { continue }
+                    if categoriesI.isDisjoint(with: categoriesJ) { continue }
+                    guard let posJ = positions[nodeJ.id] else { continue }
+                    let dx = posI.x - posJ.x
+                    let dy = posI.y - posJ.y
+                    let distance = max(sqrt(dx * dx + dy * dy), 1)
+                    let force = distance * categoryClusterStrength
+                    let unitX = dx / distance
+                    let unitY = dy / distance
+                    displacements[nodeI.id]?.x -= unitX * force
+                    displacements[nodeI.id]?.y -= unitY * force
+                    displacements[nodeJ.id]?.x += unitX * force
+                    displacements[nodeJ.id]?.y += unitY * force
+                }
             }
 
             // Gentle gravity toward origin.
@@ -99,9 +127,6 @@ struct ForceDirectedLayout: LayoutStrategy {
         return positions
     }
 
-    /// Carry over positions for nodes that still exist; seed new nodes with
-    /// pseudo-random offsets derived from their UUID hash so the initial state
-    /// breaks symmetry and the simulation doesn't settle on a perfect circle.
     private func seedPositions(graph: GraphSnapshot, previousPositions: [UUID: CGPoint]) -> [UUID: CGPoint] {
         var positions: [UUID: CGPoint] = [:]
         let knownIDs = Set(graph.nodes.map { $0.id })
