@@ -8,7 +8,13 @@ struct CGCanvasRenderer: CanvasRenderer {
     let nodeHorizontalPadding: CGFloat = 10
     let labelFontSize: CGFloat = 12
 
-    func draw(in context: CGContext, bounds: CGRect, graph: GraphSnapshot, positions: [UUID: CGPoint]) {
+    func draw(
+        in context: CGContext,
+        bounds: CGRect,
+        graph: GraphSnapshot,
+        positions: [UUID: CGPoint],
+        selectedIDs: Set<UUID>
+    ) {
         context.setFillColor(SemanticColors.AppKit.canvasBackground.cgColor)
         context.fill(bounds)
 
@@ -17,11 +23,11 @@ struct CGCanvasRenderer: CanvasRenderer {
         for node in graph.nodes {
             guard let pos = positions[node.id] else { continue }
             let canvasPos = CGPoint(x: center.x + pos.x, y: center.y + pos.y)
-            drawNode(node, at: canvasPos, in: context)
+            drawNode(node, at: canvasPos, isSelected: selectedIDs.contains(node.id), in: context)
         }
     }
 
-    private func drawNode(_ node: Node, at point: CGPoint, in context: CGContext) {
+    private func drawNode(_ node: Node, at point: CGPoint, isSelected: Bool, in context: CGContext) {
         let rect = CGRect(
             x: point.x - nodeWidth / 2,
             y: point.y - nodeHeight / 2,
@@ -41,13 +47,19 @@ struct CGCanvasRenderer: CanvasRenderer {
             blur: 2,
             color: NSColor(white: 0, alpha: 0.08).cgColor
         )
-        context.setFillColor(SemanticColors.AppKit.nodeFill.cgColor)
+        let fill = isSelected ? SemanticColors.AppKit.nodeFillSelected : SemanticColors.AppKit.nodeFill
+        context.setFillColor(fill.cgColor)
         context.addPath(pillPath)
         context.fillPath()
         context.restoreGState()
 
-        context.setStrokeColor(SemanticColors.AppKit.nodeBorder.cgColor)
-        context.setLineWidth(0.5)
+        if isSelected {
+            context.setStrokeColor(SemanticColors.AppKit.nodeBorderSelected.cgColor)
+            context.setLineWidth(1.5)
+        } else {
+            context.setStrokeColor(SemanticColors.AppKit.nodeBorder.cgColor)
+            context.setLineWidth(0.5)
+        }
         context.addPath(pillPath)
         context.strokePath()
 

@@ -16,7 +16,9 @@ enum SemanticColors {
     enum AppKit {
         static var canvasBackground: NSColor { .windowBackgroundColor }
         static var nodeFill: NSColor { .controlBackgroundColor }
+        static var nodeFillSelected: NSColor { .controlAccentColor.withAlphaComponent(0.15) }
         static var nodeBorder: NSColor { .separatorColor }
+        static var nodeBorderSelected: NSColor { .controlAccentColor }
         static var edgeDefault: NSColor { .tertiaryLabelColor }
         static var edgePositive: NSColor { .systemGreen }
         static var edgeNegative: NSColor { .systemRed }

@@ -5,6 +5,7 @@ struct DocumentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @State private var pendingFocusNodeID: UUID?
+    @State private var selectedNodeIDs: Set<UUID> = []
 
     var body: some View {
         NavigationSplitView {
@@ -14,7 +15,7 @@ struct DocumentView: View {
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
-            CanvasView()
+            CanvasView(selectedNodeIDs: $selectedNodeIDs)
                 .overlay(alignment: .bottomLeading) {
                     CanvasFooter()
                         .padding(12)

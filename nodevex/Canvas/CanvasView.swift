@@ -3,7 +3,12 @@ import SwiftData
 import AppKit
 
 struct CanvasView: NSViewRepresentable {
+    @Binding var selectedNodeIDs: Set<UUID>
     @Query private var nodes: [Node]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
 
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
@@ -17,15 +22,26 @@ struct CanvasView: NSViewRepresentable {
         scrollView.backgroundColor = SemanticColors.AppKit.canvasBackground
 
         let canvas = CanvasNSView()
+        canvas.onSelectionChange = { [weak coordinator = context.coordinator] newSelection in
+            coordinator?.parent.selectedNodeIDs = newSelection
+        }
         scrollView.documentView = canvas
 
         return scrollView
     }
 
     func updateNSView(_ nsView: CanvasScrollView, context: Context) {
+        context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
         let snapshot = GraphSnapshot(nodes: nodes, edges: [], categories: [])
-        canvas.update(graph: snapshot)
+        canvas.update(graph: snapshot, selectedNodeIDs: selectedNodeIDs)
+    }
+
+    final class Coordinator {
+        var parent: CanvasView
+        init(parent: CanvasView) {
+            self.parent = parent
+        }
     }
 }
 
