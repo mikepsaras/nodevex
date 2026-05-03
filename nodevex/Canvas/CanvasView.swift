@@ -6,6 +6,7 @@ struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
     var onNodeFocus: (UUID) -> Void
     @Query private var nodes: [Node]
+    @Query private var edges: [Edge]
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -37,7 +38,7 @@ struct CanvasView: NSViewRepresentable {
     func updateNSView(_ nsView: CanvasScrollView, context: Context) {
         context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
-        let snapshot = GraphSnapshot(nodes: nodes, edges: [], categories: [])
+        let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: [])
         canvas.update(graph: snapshot, selectedNodeIDs: selectedNodeIDs)
     }
 
