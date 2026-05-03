@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct CategoryListView: View {
-    @Query(sort: \Category.name) private var categories: [Category]
+    @Query(sort: \Category.createdAt, order: .reverse) private var categories: [Category]
 
     var body: some View {
         if categories.isEmpty {

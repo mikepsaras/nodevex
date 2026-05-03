@@ -5,6 +5,7 @@ import SwiftData
 final class Node {
     var id: UUID
     var name: String
+    var createdAt: Date
     var isPinned: Bool
     var pinnedX: Double?
     var pinnedY: Double?
@@ -15,6 +16,7 @@ final class Node {
     init(name: String) {
         self.id = UUID()
         self.name = name
+        self.createdAt = Date()
         self.isPinned = false
         self.pinnedX = nil
         self.pinnedY = nil

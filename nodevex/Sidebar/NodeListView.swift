@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct NodeListView: View {
-    @Query(sort: \Node.name) private var nodes: [Node]
+    @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
 
     var body: some View {
         if nodes.isEmpty {
