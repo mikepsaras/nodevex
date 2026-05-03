@@ -7,6 +7,8 @@ protocol CanvasRenderer {
         bounds: CGRect,
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
-        selectedIDs: Set<UUID>
+        selectedIDs: Set<UUID>,
+        edgeVisibility: EdgeVisibilityMode,
+        animationPhase: CGFloat
     )
 }

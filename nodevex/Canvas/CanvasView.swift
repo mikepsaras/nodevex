@@ -4,6 +4,7 @@ import AppKit
 
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
+    var edgeVisibility: EdgeVisibilityMode
     var onNodeFocus: (UUID) -> Void
     @Query private var nodes: [Node]
     @Query private var edges: [Edge]
@@ -39,7 +40,11 @@ struct CanvasView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
         let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: [])
-        canvas.update(graph: snapshot, selectedNodeIDs: selectedNodeIDs)
+        canvas.update(
+            graph: snapshot,
+            selectedNodeIDs: selectedNodeIDs,
+            edgeVisibility: edgeVisibility
+        )
     }
 
     final class Coordinator {
