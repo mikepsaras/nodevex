@@ -3,27 +3,36 @@ import SwiftData
 
 struct DocumentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var nodes: [Node]
+    @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
+    @State private var pendingFocusNodeID: UUID?
 
     var body: some View {
         NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
+            SidebarView(
+                onCreateNode: createNewNode,
+                pendingFocusNodeID: $pendingFocusNodeID
+            )
+            .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
-            ZStack(alignment: .bottomLeading) {
-                CanvasView()
-                CanvasFooter()
-                    .padding(12)
-            }
-            .toolbar {
-                DocumentToolbar(onCreateNode: createNewNode)
-            }
+            CanvasView()
+                .overlay(alignment: .bottomLeading) {
+                    CanvasFooter()
+                        .padding(12)
+                }
+                .overlay {
+                    if nodes.isEmpty {
+                        EmptyStateCTA(onCreate: createNewNode)
+                    }
+                }
         }
         .navigationTitle("NodeVex")
     }
 
     private func createNewNode() {
-        NodeCommands.createNode(name: nextNodeName(), in: modelContext)
+        let node = NodeCommands.createNode(name: nextNodeName(), in: modelContext)
+        DispatchQueue.main.async {
+            pendingFocusNodeID = node.id
+        }
     }
 
     private func nextNodeName() -> String {
