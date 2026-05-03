@@ -2,7 +2,11 @@ import AppKit
 import CoreGraphics
 
 struct CGCanvasRenderer: CanvasRenderer {
-    let nodeRadius: CGFloat = 28
+    let nodeWidth: CGFloat = 120
+    let nodeHeight: CGFloat = 32
+    let nodeCornerRadius: CGFloat = 16
+    let nodeHorizontalPadding: CGFloat = 10
+    let labelFontSize: CGFloat = 12
 
     func draw(in context: CGContext, bounds: CGRect, graph: GraphSnapshot, positions: [UUID: CGPoint]) {
         context.setFillColor(SemanticColors.AppKit.canvasBackground.cgColor)
@@ -19,29 +23,60 @@ struct CGCanvasRenderer: CanvasRenderer {
 
     private func drawNode(_ node: Node, at point: CGPoint, in context: CGContext) {
         let rect = CGRect(
-            x: point.x - nodeRadius,
-            y: point.y - nodeRadius,
-            width: nodeRadius * 2,
-            height: nodeRadius * 2
+            x: point.x - nodeWidth / 2,
+            y: point.y - nodeHeight / 2,
+            width: nodeWidth,
+            height: nodeHeight
+        )
+        let pillPath = CGPath(
+            roundedRect: rect,
+            cornerWidth: nodeCornerRadius,
+            cornerHeight: nodeCornerRadius,
+            transform: nil
         )
 
+        context.saveGState()
+        context.setShadow(
+            offset: CGSize(width: 0, height: 1),
+            blur: 2,
+            color: NSColor(white: 0, alpha: 0.08).cgColor
+        )
         context.setFillColor(SemanticColors.AppKit.nodeFill.cgColor)
-        context.fillEllipse(in: rect)
+        context.addPath(pillPath)
+        context.fillPath()
+        context.restoreGState()
 
         context.setStrokeColor(SemanticColors.AppKit.nodeBorder.cgColor)
         context.setLineWidth(0.5)
-        context.strokeEllipse(in: rect)
+        context.addPath(pillPath)
+        context.strokePath()
 
-        let label = node.name as NSString
+        drawLabel(node.name, in: rect)
+    }
+
+    private func drawLabel(_ text: String, in pillRect: CGRect) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byTruncatingTail
+        paragraphStyle.alignment = .center
+
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
-            .foregroundColor: SemanticColors.AppKit.textPrimary
+            .font: NSFont.systemFont(ofSize: labelFontSize),
+            .foregroundColor: SemanticColors.AppKit.textPrimary,
+            .paragraphStyle: paragraphStyle
         ]
-        let textSize = label.size(withAttributes: attributes)
-        let textOrigin = CGPoint(
-            x: point.x - textSize.width / 2,
-            y: point.y - textSize.height / 2
+
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        let labelArea = pillRect.insetBy(dx: nodeHorizontalPadding, dy: 0)
+        let textSize = attributed.boundingRect(
+            with: CGSize(width: labelArea.width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin]
+        ).size
+        let drawRect = CGRect(
+            x: labelArea.minX,
+            y: pillRect.midY - textSize.height / 2,
+            width: labelArea.width,
+            height: textSize.height
         )
-        label.draw(at: textOrigin, withAttributes: attributes)
+        attributed.draw(with: drawRect, options: [.usesLineFragmentOrigin], context: nil)
     }
 }
