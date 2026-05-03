@@ -11,6 +11,8 @@ struct CanvasView: NSViewRepresentable {
         scrollView.maxMagnification = 4.0
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
+        scrollView.verticalScrollElasticity = .allowed
+        scrollView.horizontalScrollElasticity = .allowed
         scrollView.drawsBackground = true
         scrollView.backgroundColor = SemanticColors.AppKit.canvasBackground
 
@@ -87,19 +89,26 @@ final class CanvasScrollView: NSScrollView {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true
         }
-        let visible = contentView.bounds.size
-        guard visible.width > 0, visible.height > 0 else { return }
-        let widthRatio = visible.width / canvasSize.width
-        let heightRatio = visible.height / canvasSize.height
-        let computedMin = min(min(widthRatio, heightRatio), 1.0)
-        if abs(minMagnification - computedMin) > 0.001 {
+        // contentView.frame.size is in scroll-view coordinates (mag-independent).
+        // contentView.bounds.size is in document coordinates and scales inversely with
+        // magnification, which creates a feedback loop in tile() — do not use it here.
+        let viewportSize = contentView.frame.size
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
+        let widthRatio = viewportSize.width / canvasSize.width
+        let heightRatio = viewportSize.height / canvasSize.height
+        // max() ensures canvas fills viewport in the larger-ratio dimension at min zoom
+        // (no empty space / visible canvas borders); user pans the smaller dimension.
+        let computedMin = min(max(widthRatio, heightRatio), 1.0)
+        let oldMin = minMagnification
+        if abs(minMagnification - computedMin) > 0.01 {
             minMagnification = computedMin
+            if computedMin > oldMin && magnification < computedMin {
+                magnification = computedMin
+            }
         }
         if !hasAppliedInitialZoom {
             magnification = computedMin
             hasAppliedInitialZoom = true
-        } else if magnification < computedMin {
-            magnification = computedMin
         }
     }
 }
