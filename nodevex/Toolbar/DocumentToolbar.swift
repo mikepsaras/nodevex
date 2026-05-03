@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct DocumentToolbar: ToolbarContent {
+    let onCreateNode: () -> Void
+
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
-                // TODO: create new node via NodeCommands
+                onCreateNode()
             } label: {
                 Label("New Node", systemImage: "plus")
             }

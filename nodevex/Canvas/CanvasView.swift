@@ -10,10 +10,19 @@ struct CanvasView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = true
         scrollView.backgroundColor = SemanticColors.AppKit.canvasBackground
 
-        let canvas = CanvasNSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        let canvas = CanvasNSView()
+        canvas.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = canvas
+
+        NSLayoutConstraint.activate([
+            canvas.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            canvas.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            canvas.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            canvas.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor)
+        ])
 
         return scrollView
     }
