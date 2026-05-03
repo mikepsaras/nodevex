@@ -3,5 +3,5 @@ import CoreGraphics
 
 protocol LayoutStrategy {
     var name: String { get }
-    func compute(graph: GraphSnapshot) -> [UUID: CGPoint]
+    func compute(graph: GraphSnapshot, previousPositions: [UUID: CGPoint]) -> [UUID: CGPoint]
 }

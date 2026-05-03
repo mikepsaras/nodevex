@@ -7,6 +7,6 @@ final class LayoutEngine {
     var currentStrategy: any LayoutStrategy = ForceDirectedLayout()
 
     func relayout(graph: GraphSnapshot) {
-        positions = currentStrategy.compute(graph: graph)
+        positions = currentStrategy.compute(graph: graph, previousPositions: positions)
     }
 }

@@ -7,6 +7,7 @@ final class CanvasNSView: NSView {
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
     private var positions: [UUID: CGPoint] = [:]
     private var selectedNodeIDs: Set<UUID> = []
+    private var lastGraphSignature: Int?
 
     var onSelectionChange: ((Set<UUID>) -> Void)?
 
@@ -15,9 +16,15 @@ final class CanvasNSView: NSView {
 
     @MainActor
     func update(graph: GraphSnapshot, selectedNodeIDs: Set<UUID>) {
-        self.graph = graph
-        layoutEngine.relayout(graph: graph)
-        self.positions = layoutEngine.positions
+        let signature = graphSignature(graph)
+        if signature != lastGraphSignature {
+            self.graph = graph
+            layoutEngine.relayout(graph: graph)
+            self.positions = layoutEngine.positions
+            lastGraphSignature = signature
+        } else {
+            self.graph = graph
+        }
         if self.selectedNodeIDs != selectedNodeIDs {
             self.selectedNodeIDs = selectedNodeIDs
         }
@@ -39,8 +46,6 @@ final class CanvasNSView: NSView {
         window?.makeFirstResponder(self)
 
         let pointInView = convert(event.locationInWindow, from: nil)
-        // Layout positions are centered around (0, 0); the renderer offsets by
-        // canvas midpoint to draw. Mirror that to test in canvas-space.
         let canvasPoint = CGPoint(
             x: pointInView.x - bounds.midX,
             y: pointInView.y - bounds.midY
@@ -72,18 +77,31 @@ final class CanvasNSView: NSView {
     }
 
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
-        // Pill bounds match CGCanvasRenderer's nodeWidth (120) and nodeHeight (32).
-        // TODO: extract pill metrics to a shared constant when we add shape variants.
-        let halfWidth: CGFloat = 60
-        let halfHeight: CGFloat = 16
-        // Reverse iteration so the most-recently-added (top-most-drawn) node hits first.
+        // Hit area is generous (16) compared to visual radius (7) so small targets
+        // are easy to click. Match CGCanvasRenderer's nodeRadius if updated.
+        let hitRadius: CGFloat = 16
+        let hitRadiusSquared = hitRadius * hitRadius
         for node in graph.nodes.reversed() {
             guard let pos = positions[node.id] else { continue }
-            if abs(canvasPoint.x - pos.x) <= halfWidth,
-               abs(canvasPoint.y - pos.y) <= halfHeight {
+            let dx = canvasPoint.x - pos.x
+            let dy = canvasPoint.y - pos.y
+            if dx * dx + dy * dy <= hitRadiusSquared {
                 return node.id
             }
         }
         return nil
+    }
+
+    private func graphSignature(_ graph: GraphSnapshot) -> Int {
+        var hasher = Hasher()
+        for node in graph.nodes {
+            hasher.combine(node.id)
+        }
+        for edge in graph.edges {
+            hasher.combine(edge.id)
+            hasher.combine(edge.sourceID)
+            hasher.combine(edge.targetID)
+        }
+        return hasher.finalize()
     }
 }

@@ -2,11 +2,12 @@ import AppKit
 import CoreGraphics
 
 struct CGCanvasRenderer: CanvasRenderer {
-    let nodeWidth: CGFloat = 120
-    let nodeHeight: CGFloat = 32
-    let nodeCornerRadius: CGFloat = 16
-    let nodeHorizontalPadding: CGFloat = 10
-    let labelFontSize: CGFloat = 12
+    let nodeRadius: CGFloat = 7
+    let selectedNodeRadius: CGFloat = 8
+    let nodeBorderWidth: CGFloat = 1.0
+    let labelGap: CGFloat = 6
+    let labelFontSize: CGFloat = 11
+    let labelMaxWidth: CGFloat = 140
 
     func draw(
         in context: CGContext,
@@ -28,67 +29,54 @@ struct CGCanvasRenderer: CanvasRenderer {
     }
 
     private func drawNode(_ node: Node, at point: CGPoint, isSelected: Bool, in context: CGContext) {
-        let rect = CGRect(
-            x: point.x - nodeWidth / 2,
-            y: point.y - nodeHeight / 2,
-            width: nodeWidth,
-            height: nodeHeight
-        )
-        let pillPath = CGPath(
-            roundedRect: rect,
-            cornerWidth: nodeCornerRadius,
-            cornerHeight: nodeCornerRadius,
-            transform: nil
+        let radius = isSelected ? selectedNodeRadius : nodeRadius
+        let circleRect = CGRect(
+            x: point.x - radius,
+            y: point.y - radius,
+            width: radius * 2,
+            height: radius * 2
         )
 
-        context.saveGState()
-        context.setShadow(
-            offset: CGSize(width: 0, height: 1),
-            blur: 2,
-            color: NSColor(white: 0, alpha: 0.08).cgColor
-        )
-        let fill = isSelected ? SemanticColors.AppKit.nodeFillSelected : SemanticColors.AppKit.nodeFill
+        // Filled circle.
+        let fill = isSelected
+            ? NSColor.controlAccentColor
+            : NSColor.secondaryLabelColor
         context.setFillColor(fill.cgColor)
-        context.addPath(pillPath)
-        context.fillPath()
-        context.restoreGState()
+        context.fillEllipse(in: circleRect)
 
-        if isSelected {
-            context.setStrokeColor(SemanticColors.AppKit.nodeBorderSelected.cgColor)
-            context.setLineWidth(1.5)
-        } else {
-            context.setStrokeColor(SemanticColors.AppKit.nodeBorder.cgColor)
-            context.setLineWidth(0.5)
-        }
-        context.addPath(pillPath)
-        context.strokePath()
+        // Subtle border for definition against the canvas background.
+        context.setStrokeColor(SemanticColors.AppKit.nodeBorder.cgColor)
+        context.setLineWidth(nodeBorderWidth)
+        context.strokeEllipse(in: circleRect)
 
-        drawLabel(node.name, in: rect)
+        drawLabel(node.name, below: point, radius: radius, isSelected: isSelected)
     }
 
-    private func drawLabel(_ text: String, in pillRect: CGRect) {
+    private func drawLabel(_ text: String, below point: CGPoint, radius: CGFloat, isSelected: Bool) {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byTruncatingTail
         paragraphStyle.alignment = .center
 
+        let color = isSelected
+            ? NSColor.labelColor
+            : NSColor.secondaryLabelColor
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: labelFontSize),
-            .foregroundColor: SemanticColors.AppKit.textPrimary,
+            .foregroundColor: color,
             .paragraphStyle: paragraphStyle
         ]
 
         let attributed = NSAttributedString(string: text, attributes: attributes)
-        let labelArea = pillRect.insetBy(dx: nodeHorizontalPadding, dy: 0)
         let textSize = attributed.boundingRect(
-            with: CGSize(width: labelArea.width, height: .greatestFiniteMagnitude),
+            with: CGSize(width: labelMaxWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin]
         ).size
-        let drawRect = CGRect(
-            x: labelArea.minX,
-            y: pillRect.midY - textSize.height / 2,
-            width: labelArea.width,
+        let labelRect = CGRect(
+            x: point.x - labelMaxWidth / 2,
+            y: point.y + radius + labelGap,
+            width: labelMaxWidth,
             height: textSize.height
         )
-        attributed.draw(with: drawRect, options: [.usesLineFragmentOrigin], context: nil)
+        attributed.draw(with: labelRect, options: [.usesLineFragmentOrigin], context: nil)
     }
 }
