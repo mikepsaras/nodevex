@@ -41,6 +41,20 @@ struct DocumentView: View {
                 NodeFocusView(node: focusedNode, onDismiss: { focusedNodeID = nil })
             }
         }
+        .background {
+            Button("Delete Selected", action: deleteSelectedNodes)
+                .keyboardShortcut(.delete, modifiers: [])
+                .opacity(0)
+                .disabled(selectedNodeIDs.isEmpty || focusedNodeID != nil)
+        }
+    }
+
+    private func deleteSelectedNodes() {
+        let toDelete = nodes.filter { selectedNodeIDs.contains($0.id) }
+        for node in toDelete {
+            NodeCommands.deleteNode(node, in: modelContext)
+        }
+        selectedNodeIDs.removeAll()
     }
 
     private func createNewNode() {
