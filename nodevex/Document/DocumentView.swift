@@ -4,6 +4,8 @@ import SwiftData
 struct DocumentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
+    @Query private var edges: [Edge]
+    @Query private var categories: [Category]
     @State private var pendingFocusNodeID: UUID?
     @State private var selectedNodeIDs: Set<UUID> = []
     @State private var focusedNodeID: UUID?
@@ -49,6 +51,16 @@ struct DocumentView: View {
                 .opacity(0)
                 .disabled(selectedNodeIDs.isEmpty || focusedNodeID != nil)
         }
+        .background {
+            Button("Run Graph Analysis", action: runGraphAnalysis)
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .opacity(0)
+        }
+    }
+
+    private func runGraphAnalysis() {
+        let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: categories)
+        AnalysisRunner.runAll(graph: snapshot)
     }
 
     private func deleteSelectedNodes() {
