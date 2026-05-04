@@ -17,6 +17,11 @@ enum AnalysisRunner {
             return
         }
 
+        // Order-dependent demos (shortest path, propagation pin) read from
+        // creation order so the labels match what a user would expect rather
+        // than whatever order @Query returned.
+        let chronological = graph.nodes.sorted(by: { $0.createdAt < $1.createdAt })
+
         print("\n— Edges (raw) —")
         for edge in graph.edges {
             print(String(format: "  %@ → %@   valence=%@   strength=%.2f",
@@ -45,10 +50,10 @@ enum AnalysisRunner {
         }
 
         // --- Shortest paths ---
-        print("\n— Shortest Path (first node → last node) —")
+        print("\n— Shortest Path (earliest → latest node by creation time) —")
         if graph.nodes.count >= 2 {
-            let src = graph.nodes.first!.id
-            let dst = graph.nodes.last!.id
+            let src = chronological.first!.id
+            let dst = chronological.last!.id
             print("  from: \(name(src))    to: \(name(dst))")
             if let bfs = ShortestPath.bfs(from: src, to: dst, graph: graph) {
                 print("  BFS (\(bfs.count - 1) hops): " + bfs.map(name).joined(separator: " → "))
@@ -81,8 +86,8 @@ enum AnalysisRunner {
         }
 
         // --- Propagation ---
-        print("\n— Propagation (pin first node = 1.0) —")
-        let pinned: [UUID: Double] = [graph.nodes.first!.id: 1.0]
+        print("\n— Propagation (pin earliest node = 1.0) —")
+        let pinned: [UUID: Double] = [chronological.first!.id: 1.0]
         let result = Propagation.propagate(initialValues: pinned, graph: graph)
         let suffix = result.converged ? "converged" : "did not converge"
         print("  iterations: \(result.iterationsTaken)  (\(suffix))")
