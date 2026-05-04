@@ -7,8 +7,8 @@ import AppKit
 /// NSTextField with everything turned off so the only visible edit affordance
 /// is the system-blue insertion cursor.
 ///
-/// Auto-focuses and selects-all on first appearance so typing immediately
-/// replaces the existing name. Return / Escape / focus-loss all commit.
+/// Auto-focuses with cursor at end on first appearance. Return / Escape /
+/// focus-loss all commit.
 struct InlineEditField: NSViewRepresentable {
     @Binding var text: String
     var onCommit: () -> Void
