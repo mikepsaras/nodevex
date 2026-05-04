@@ -36,44 +36,43 @@ struct NodeRowView: View {
     let onCommitEdit: () -> Void
     let onDelete: () -> Void
 
+    @State private var isHoveringRow = false
     @State private var isHoveringTrash = false
-    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-        HStack {
-            if isEditing {
-                TextField("Name", text: $node.name)
-                    .focused($isFieldFocused)
-                    .textFieldStyle(.plain)
-                    .onSubmit(onCommitEdit)
-                    .onAppear { isFieldFocused = true }
-                    .onChange(of: isFieldFocused) { _, focused in
-                        // Click-out commits the edit. Guard on isEditing so we
-                        // don't double-fire when the parent already cleared
-                        // editingNodeID (e.g., on Return).
-                        if !focused && isEditing { onCommitEdit() }
-                    }
-            } else {
-                Text(node.name)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 8) {
+            Group {
+                if isEditing {
+                    InlineEditField(text: $node.name, onCommit: onCommitEdit)
+                } else {
+                    Text(node.name)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
-                    .foregroundStyle(isHoveringTrash ? Color.red : SemanticColors.textSecondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(isHoveringTrash ? .red : SemanticColors.textSecondary)
             }
             .buttonStyle(.plain)
             .onHover { isHoveringTrash = $0 }
             .help("Delete node")
+            .opacity((isHoveringRow || isSelected) ? 1 : 0)
+            .animation(.easeInOut(duration: 0.12), value: isHoveringRow)
+            .animation(.easeInOut(duration: 0.12), value: isSelected)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background(isSelected ? SemanticColors.nodeFillSelected : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
         // simultaneousGesture fires alongside child controls (TextField focus,
         // trash button) so any tap on the row also sets canvas selection.
         .contentShape(Rectangle())
+        .onHover { isHoveringRow = $0 }
         .simultaneousGesture(TapGesture().onEnded { onSelect() })
     }
 }
