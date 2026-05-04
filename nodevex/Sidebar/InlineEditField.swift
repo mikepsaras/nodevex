@@ -37,7 +37,14 @@ struct InlineEditField: NSViewRepresentable {
             context.coordinator.shouldFocus = false
             DispatchQueue.main.async {
                 nsView.window?.makeFirstResponder(nsView)
-                nsView.currentEditor()?.selectAll(nil)
+                // Place cursor at end rather than selecting all — selectAll
+                // draws a text-selection highlight rectangle that reads as
+                // an "input box" inside the row. ⌘A still selects manually
+                // if the user wants to replace the whole name.
+                if let editor = nsView.currentEditor() {
+                    let length = (editor.string as NSString).length
+                    editor.selectedRange = NSRange(location: length, length: 0)
+                }
             }
         }
     }
