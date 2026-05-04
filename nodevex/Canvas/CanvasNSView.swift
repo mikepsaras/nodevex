@@ -15,9 +15,20 @@ final class CanvasNSView: NSView {
 
     var onSelectionChange: ((Set<UUID>) -> Void)?
     var onNodeFocus: ((UUID) -> Void)?
+    var onNodePin: ((UUID, CGPoint) -> Void)?
+    var onNodeUnpin: ((UUID) -> Void)?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    private struct DragState {
+        let nodeID: UUID
+        let downPoint: CGPoint
+        let originalPosition: CGPoint
+        var didCrossThreshold: Bool
+    }
+    private var dragState: DragState?
+    private let dragThreshold: CGFloat = 3
 
     deinit {
         animationTimer?.invalidate()
@@ -105,6 +116,28 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
+        // Option-click on a pinned node unpins it and leaves selection alone.
+        if modifiers.contains(.option),
+           let hitID,
+           let node = graph.nodes.first(where: { $0.id == hitID }),
+           node.isPinned {
+            onNodeUnpin?(hitID)
+            return
+        }
+
+        // Set up potential drag-to-pin. Selection still happens immediately
+        // below — drag and selection layer cleanly because they don't conflict.
+        if let hitID, let pos = positions[hitID] {
+            dragState = DragState(
+                nodeID: hitID,
+                downPoint: canvasPoint,
+                originalPosition: pos,
+                didCrossThreshold: false
+            )
+        } else {
+            dragState = nil
+        }
+
         var newSelection = selectedNodeIDs
         if let hitID {
             if modifiers.contains(.shift) {
@@ -126,6 +159,39 @@ final class CanvasNSView: NSView {
         selectedNodeIDs = newSelection
         needsDisplay = true
         onSelectionChange?(newSelection)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var state = dragState else { return }
+        let pointInView = convert(event.locationInWindow, from: nil)
+        let canvasPoint = CGPoint(
+            x: pointInView.x - bounds.midX,
+            y: pointInView.y - bounds.midY
+        )
+
+        let dx = canvasPoint.x - state.downPoint.x
+        let dy = canvasPoint.y - state.downPoint.y
+        if !state.didCrossThreshold && (dx * dx + dy * dy) > dragThreshold * dragThreshold {
+            state.didCrossThreshold = true
+        }
+
+        if state.didCrossThreshold {
+            positions[state.nodeID] = CGPoint(
+                x: state.originalPosition.x + dx,
+                y: state.originalPosition.y + dy
+            )
+            needsDisplay = true
+        }
+
+        dragState = state
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { dragState = nil }
+        guard let state = dragState, state.didCrossThreshold else { return }
+        if let pos = positions[state.nodeID] {
+            onNodePin?(state.nodeID, pos)
+        }
     }
 
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
@@ -155,11 +221,17 @@ final class CanvasNSView: NSView {
         let edgeFingerprints: Set<String> = Set(graph.edges.map { edge in
             "\(edge.id):\(edge.sourceID):\(edge.targetID)"
         })
+        // Pin *bool* — not coords. We want unpin to trigger a relayout (so the
+        // node reflows), but dragging an already-pinned node should not (we
+        // update positions directly during drag and don't want a force-iteration
+        // pass to fight that).
+        let pinnedIDs: Set<UUID> = Set(graph.nodes.filter { $0.isPinned }.map { $0.id })
 
         var hasher = Hasher()
         hasher.combine(nodeIDs)
         hasher.combine(categoryMemberships)
         hasher.combine(edgeFingerprints)
+        hasher.combine(pinnedIDs)
         return hasher.finalize()
     }
 }

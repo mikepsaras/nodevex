@@ -104,8 +104,10 @@ struct ForceDirectedLayout: LayoutStrategy {
                 displacements[node.id]?.y -= pos.y * gravityStrength
             }
 
-            // Apply with temperature cap and a safety-radius backstop.
+            // Apply with temperature cap and a safety-radius backstop. Pinned
+            // nodes exert forces on others but never move themselves.
             for node in graph.nodes {
+                if node.isPinned { continue }
                 guard let pos = positions[node.id], let disp = displacements[node.id] else { continue }
                 let dispMag = max(sqrt(disp.x * disp.x + disp.y * disp.y), 0.001)
                 let limited = min(dispMag, temperature)
@@ -141,6 +143,12 @@ struct ForceDirectedLayout: LayoutStrategy {
                 x: cos(angle) * radius,
                 y: sin(angle) * radius
             )
+        }
+        // Pinned coordinates take precedence — overwrite whatever seed we had.
+        for node in graph.nodes where node.isPinned {
+            if let x = node.pinnedX, let y = node.pinnedY {
+                positions[node.id] = CGPoint(x: CGFloat(x), y: CGFloat(y))
+            }
         }
         return positions
     }
