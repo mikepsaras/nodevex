@@ -89,7 +89,7 @@ final class CanvasNSView: NSView {
         let signature = graphSignature(graph)
         if signature != lastGraphSignature || layoutModeChanged {
             self.graph = graph
-            layoutEngine.applyGraphChange(graph)
+            layoutEngine.applyGraphChange(graph, seedOrigin: currentViewportCenterWorld())
             self.positions = layoutEngine.positions
             lastGraphSignature = signature
         } else {
@@ -141,6 +141,18 @@ final class CanvasNSView: NSView {
                 phase: .fadingOut(startTime: Date(), duration: revealFadeOutModalDuration)
             )
         }
+    }
+
+    /// Center of the visible scroll-view region in canvas-center-relative
+    /// coords. Used as the seed origin for newly-created nodes so they spawn
+    /// where the user is currently looking, not at the canvas origin.
+    private func currentViewportCenterWorld() -> CGPoint {
+        guard let scrollView = enclosingScrollView else { return .zero }
+        let visible = scrollView.documentVisibleRect
+        return CGPoint(
+            x: visible.midX - bounds.midX,
+            y: visible.midY - bounds.midY
+        )
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling

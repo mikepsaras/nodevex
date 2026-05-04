@@ -48,14 +48,17 @@ final class LayoutEngine {
 
     /// Reseed positions for new/removed nodes, reset alpha so the sim has
     /// energy to settle the change. Keeps existing positions for nodes that
-    /// were already present.
-    func applyGraphChange(_ graph: GraphSnapshot) {
+    /// were already present. `seedOrigin` is the canvas-center-relative point
+    /// new nodes should spawn around (in force-directed mode); hierarchical
+    /// ignores it.
+    func applyGraphChange(_ graph: GraphSnapshot, seedOrigin: CGPoint = .zero) {
         lastGraph = graph
         switch currentMode {
         case .forceDirected:
             positions = forceLayout.seedPositions(
                 graph: graph,
-                previousPositions: positions
+                previousPositions: positions,
+                seedOrigin: seedOrigin
             )
             // Drop velocities for nodes no longer present; new nodes start
             // with zero velocity (the seed dictionary handles this implicitly).
