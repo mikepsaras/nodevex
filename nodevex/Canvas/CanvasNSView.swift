@@ -59,6 +59,7 @@ final class CanvasNSView: NSView {
     private var reveal: RevealState?
     private var trackingArea: NSTrackingArea?
     private var lastModalFocusedNodeID: UUID?
+    private var lastLayoutMode: LayoutMode?
 
     deinit {
         animationTimer?.invalidate()
@@ -70,10 +71,17 @@ final class CanvasNSView: NSView {
         graph: GraphSnapshot,
         selectedNodeIDs: Set<UUID>,
         modalFocusedNodeID: UUID?,
-        edgeVisibility: EdgeVisibilityMode
+        edgeVisibility: EdgeVisibilityMode,
+        layoutMode: LayoutMode
     ) {
+        let layoutModeChanged = lastLayoutMode != layoutMode
+        if layoutModeChanged {
+            layoutEngine.currentStrategy = layoutMode.strategy
+            lastLayoutMode = layoutMode
+        }
+
         let signature = graphSignature(graph)
-        if signature != lastGraphSignature {
+        if signature != lastGraphSignature || layoutModeChanged {
             self.graph = graph
             layoutEngine.relayout(graph: graph)
             self.positions = layoutEngine.positions

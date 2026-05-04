@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CanvasFooter: View {
     @Binding var edgeVisibility: EdgeVisibilityMode
-    @State private var currentLayoutName = "Force-directed"
+    @Binding var layoutMode: LayoutMode
 
     var body: some View {
         HStack(spacing: 8) {
@@ -13,10 +13,11 @@ struct CanvasFooter: View {
 
     private var layoutMenu: some View {
         Menu {
-            Button("Force-directed") { currentLayoutName = "Force-directed" }
-            Button("Hierarchical") { currentLayoutName = "Hierarchical" }
+            ForEach(LayoutMode.allCases) { mode in
+                Button(mode.label) { layoutMode = mode }
+            }
         } label: {
-            footerLabel(text: currentLayoutName)
+            footerLabel(text: layoutMode.label)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)

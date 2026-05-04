@@ -5,9 +5,14 @@ import AppKit
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
     var edgeVisibility: EdgeVisibilityMode
+    var layoutMode: LayoutMode
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
-    @Query private var nodes: [Node]
+    // Sort by createdAt forward so the canvas processes nodes in creation
+    // order. Hierarchical layout's barycenter sort treats isolated nodes'
+    // position in the input array as their tie-break score, so a stable input
+    // order is what makes layouts predictable.
+    @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
 
     func makeCoordinator() -> Coordinator {
@@ -55,7 +60,8 @@ struct CanvasView: NSViewRepresentable {
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
             modalFocusedNodeID: modalFocusedNodeID,
-            edgeVisibility: edgeVisibility
+            edgeVisibility: edgeVisibility,
+            layoutMode: layoutMode
         )
     }
 
