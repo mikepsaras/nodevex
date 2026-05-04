@@ -63,3 +63,6 @@ fastlane/test_output
 
 # Local-only dev logs and design notes
 .devlog/
+
+# macOS
+.DS_Store

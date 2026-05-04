@@ -157,8 +157,14 @@ struct ForceDirectedLayout {
 
     /// Establish initial positions for any node that doesn't already have one.
     /// Existing positions are preserved (so a graph addition doesn't scramble
-    /// the layout). Called by `LayoutEngine` on graph change.
-    func seedPositions(graph: GraphSnapshot, previousPositions: [UUID: CGPoint]) -> [UUID: CGPoint] {
+    /// the layout). New nodes spawn around `seedOrigin` (canvas-center coords)
+    /// so they land where the user is currently looking.
+    /// Called by `LayoutEngine` on graph change.
+    func seedPositions(
+        graph: GraphSnapshot,
+        previousPositions: [UUID: CGPoint],
+        seedOrigin: CGPoint = .zero
+    ) -> [UUID: CGPoint] {
         var positions: [UUID: CGPoint] = [:]
         let knownIDs = Set(graph.nodes.map { $0.id })
         for (id, pos) in previousPositions where knownIDs.contains(id) {
@@ -169,8 +175,8 @@ struct ForceDirectedLayout {
             let angle = CGFloat(hash % 1000) / 1000.0 * 2 * .pi
             let radius = CGFloat(20 + (hash % 60))
             positions[node.id] = CGPoint(
-                x: cos(angle) * radius,
-                y: sin(angle) * radius
+                x: seedOrigin.x + cos(angle) * radius,
+                y: seedOrigin.y + sin(angle) * radius
             )
         }
         return positions

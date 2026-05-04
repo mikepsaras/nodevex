@@ -6,7 +6,7 @@ struct DocumentView: View {
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
-    @State private var pendingFocusNodeID: UUID?
+    @State private var editingNodeID: UUID?
     @State private var selectedNodeIDs: Set<UUID> = []
     @State private var focusedNodeID: UUID?
     @State private var edgeVisibility: EdgeVisibilityMode = .hidden
@@ -21,7 +21,17 @@ struct DocumentView: View {
         NavigationSplitView {
             SidebarView(
                 onCreateNode: createNewNode,
-                pendingFocusNodeID: $pendingFocusNodeID
+                editingNodeID: $editingNodeID,
+                selectedNodeIDs: selectedNodeIDs,
+                onSelectNode: { id in
+                    // Picking a different row also commits any in-progress
+                    // edit. Without this the click doesn't defocus the
+                    // editing NSTextField, so the user would hit Return
+                    // once to commit and a second time to edit the newly
+                    // selected node.
+                    if editingNodeID != id { editingNodeID = nil }
+                    selectedNodeIDs = [id]
+                }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
@@ -52,7 +62,13 @@ struct DocumentView: View {
             Button("Delete Selected", action: deleteSelectedNodes)
                 .keyboardShortcut(.delete, modifiers: [])
                 .opacity(0)
-                .disabled(selectedNodeIDs.isEmpty || focusedNodeID != nil)
+                .disabled(selectedNodeIDs.isEmpty || focusedNodeID != nil || editingNodeID != nil)
+        }
+        .background {
+            Button("Edit Selected", action: editSelectedNode)
+                .keyboardShortcut(.return, modifiers: [])
+                .opacity(0)
+                .disabled(selectedNodeIDs.count != 1 || focusedNodeID != nil || editingNodeID != nil)
         }
         .background {
             Button("Run Graph Analysis", action: runGraphAnalysis)
@@ -74,11 +90,15 @@ struct DocumentView: View {
         selectedNodeIDs.removeAll()
     }
 
+    private func editSelectedNode() {
+        guard selectedNodeIDs.count == 1, let id = selectedNodeIDs.first else { return }
+        editingNodeID = id
+    }
+
     private func createNewNode() {
         let node = NodeCommands.createNode(name: nextNodeName(), in: modelContext)
-        DispatchQueue.main.async {
-            pendingFocusNodeID = node.id
-        }
+        selectedNodeIDs = [node.id]
+        editingNodeID = node.id
     }
 
     private func nextNodeName() -> String {

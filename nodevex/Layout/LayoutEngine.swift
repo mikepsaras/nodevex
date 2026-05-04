@@ -41,16 +41,24 @@ final class LayoutEngine {
     /// "fluid" feel. CanvasNSView gates its animation timer on this.
     var isActive: Bool { currentMode == .forceDirected }
 
+    /// True while a drag is in progress. CanvasNSView gates its timer on
+    /// this too so drag works in hierarchical mode (where `isActive` is
+    /// false and physics is otherwise dormant).
+    var isDragging: Bool { draggedNodeID != nil }
+
     /// Reseed positions for new/removed nodes, reset alpha so the sim has
     /// energy to settle the change. Keeps existing positions for nodes that
-    /// were already present.
-    func applyGraphChange(_ graph: GraphSnapshot) {
+    /// were already present. `seedOrigin` is the canvas-center-relative point
+    /// new nodes should spawn around (in force-directed mode); hierarchical
+    /// ignores it.
+    func applyGraphChange(_ graph: GraphSnapshot, seedOrigin: CGPoint = .zero) {
         lastGraph = graph
         switch currentMode {
         case .forceDirected:
             positions = forceLayout.seedPositions(
                 graph: graph,
-                previousPositions: positions
+                previousPositions: positions,
+                seedOrigin: seedOrigin
             )
             // Drop velocities for nodes no longer present; new nodes start
             // with zero velocity (the seed dictionary handles this implicitly).
@@ -70,15 +78,17 @@ final class LayoutEngine {
     /// only the dragged node updates (override to cursor). This preserves the
     /// pre-drag equilibrium so on release the node has its full drag distance
     /// to traverse at the (low) floor velocity, producing a visible pull-back.
+    /// Drag override runs regardless of mode so dragging still works in
+    /// hierarchical (where physics is otherwise off).
     @discardableResult
     func tick() -> Bool {
-        guard let graph = lastGraph, isActive else { return false }
-
         if let nodeID = draggedNodeID, let pos = draggedNodePosition {
             positions[nodeID] = pos
             velocities[nodeID] = .zero
             return true
         }
+
+        guard let graph = lastGraph, isActive else { return false }
 
         let result = forceLayout.advance(
             graph: graph,

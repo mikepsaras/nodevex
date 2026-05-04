@@ -2,7 +2,14 @@ import Foundation
 
 enum Centrality {
     /// PageRank via power iteration. Returns rank ∈ (0, 1] per node, sums to ~1.
-    static func pageRank(graph: GraphSnapshot, dampingFactor: Double = 0.85, iterations: Int = 50) -> [UUID: Double] {
+    /// Iterates up to `iterations` times or stops early when the largest
+    /// single-step change drops below `convergenceThreshold`.
+    static func pageRank(
+        graph: GraphSnapshot,
+        dampingFactor: Double = 0.85,
+        iterations: Int = 50,
+        convergenceThreshold: Double = 0.0001
+    ) -> [UUID: Double] {
         guard !graph.nodes.isEmpty else { return [:] }
         let n = Double(graph.nodes.count)
 
@@ -27,15 +34,20 @@ enum Centrality {
             }
             let danglingShare = dampingFactor * danglingMass / n
 
+            var maxDelta = 0.0
             for node in graph.nodes {
                 var sum = 0.0
                 for source in incoming[node.id] ?? [] {
                     let outDeg = max(outDegree[source] ?? 1, 1)
                     sum += (ranks[source] ?? 0) / Double(outDeg)
                 }
-                newRanks[node.id] = teleport + danglingShare + dampingFactor * sum
+                let newValue = teleport + danglingShare + dampingFactor * sum
+                newRanks[node.id] = newValue
+                let delta = abs(newValue - (ranks[node.id] ?? 0))
+                if delta > maxDelta { maxDelta = delta }
             }
             ranks = newRanks
+            if maxDelta < convergenceThreshold { break }
         }
         return ranks
     }
@@ -105,8 +117,14 @@ enum Centrality {
     }
 
     /// Eigenvector centrality via power iteration. Result is L2-normalized so
-    /// values across nodes are directly comparable.
-    static func eigenvector(graph: GraphSnapshot, iterations: Int = 50) -> [UUID: Double] {
+    /// values across nodes are directly comparable. Iterates up to `iterations`
+    /// times or stops early when the largest single-step change drops below
+    /// `convergenceThreshold`.
+    static func eigenvector(
+        graph: GraphSnapshot,
+        iterations: Int = 50,
+        convergenceThreshold: Double = 0.0001
+    ) -> [UUID: Double] {
         guard !graph.nodes.isEmpty else { return [:] }
 
         var values: [UUID: Double] = [:]
@@ -133,7 +151,13 @@ enum Centrality {
                     newValues[id] = v / norm
                 }
             }
+            var maxDelta = 0.0
+            for node in graph.nodes {
+                let delta = abs((newValues[node.id] ?? 0) - (values[node.id] ?? 0))
+                if delta > maxDelta { maxDelta = delta }
+            }
             values = newValues
+            if maxDelta < convergenceThreshold { break }
         }
         return values
     }

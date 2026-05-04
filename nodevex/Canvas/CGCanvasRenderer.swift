@@ -88,6 +88,12 @@ struct CGCanvasRenderer: CanvasRenderer {
         animationPhase: CGFloat,
         in context: CGContext
     ) {
+        if edge.sourceID == edge.targetID {
+            let color = edgeColor(for: edge.valence).withAlphaComponent(opacityScale)
+            drawSelfLoop(at: sourcePos, color: color, in: context)
+            return
+        }
+
         let dx = targetPos.x - sourcePos.x
         let dy = targetPos.y - sourcePos.y
         let distance = sqrt(dx * dx + dy * dy)
@@ -172,6 +178,24 @@ struct CGCanvasRenderer: CanvasRenderer {
                 )
             }
         }
+    }
+
+    /// Self-loop rendering: a small stroked circle sitting on top of the
+    /// node. Visibility mode is ignored — animated arrowheads on a tiny
+    /// closed loop don't read well, so we keep it static regardless.
+    private func drawSelfLoop(at point: CGPoint, color: NSColor, in context: CGContext) {
+        let loopRadius: CGFloat = 8
+        // isFlipped: true ⇒ smaller y is visually higher.
+        let loopCenter = CGPoint(x: point.x, y: point.y - nodeRadius - loopRadius)
+        let rect = CGRect(
+            x: loopCenter.x - loopRadius,
+            y: loopCenter.y - loopRadius,
+            width: 2 * loopRadius,
+            height: 2 * loopRadius
+        )
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(edgeLineWidth)
+        context.strokeEllipse(in: rect)
     }
 
     private func drawArrowhead(
