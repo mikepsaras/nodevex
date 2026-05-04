@@ -17,7 +17,6 @@ struct InlineEditField: NSViewRepresentable {
         let field = NSTextField()
         field.isBordered = false
         field.isBezeled = false
-        field.bezelStyle = .squareBezel
         field.drawsBackground = false
         field.backgroundColor = .clear
         field.focusRingType = .none
@@ -25,13 +24,9 @@ struct InlineEditField: NSViewRepresentable {
         field.delegate = context.coordinator
         field.stringValue = text
 
-        // Belt-and-suspenders: cell properties on NSTextFieldCell don't
-        // always inherit cleanly from the field, so configure them too.
+        // focusRingType, single-line mode, and line break mode live on the
+        // cell and don't reliably forward from the field.
         if let cell = field.cell as? NSTextFieldCell {
-            cell.isBordered = false
-            cell.isBezeled = false
-            cell.drawsBackground = false
-            cell.backgroundColor = .clear
             cell.focusRingType = .none
             cell.usesSingleLineMode = true
             cell.lineBreakMode = .byTruncatingTail
