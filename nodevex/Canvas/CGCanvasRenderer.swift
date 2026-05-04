@@ -24,7 +24,8 @@ struct CGCanvasRenderer: CanvasRenderer {
         revealedNodeID: UUID?,
         revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
-        animationPhase: CGFloat
+        animationPhase: CGFloat,
+        zoom: CGFloat
     ) {
         context.setFillColor(SemanticColors.AppKit.canvasBackground.cgColor)
         context.fill(bounds)
@@ -40,7 +41,7 @@ struct CGCanvasRenderer: CanvasRenderer {
             let isRevealConnected = revealedNodeID != nil &&
                 (edge.sourceID == revealedNodeID || edge.targetID == revealedNodeID)
 
-            let effectiveVisibility: EdgeVisibilityMode
+            var effectiveVisibility: EdgeVisibilityMode
             let opacityScale: CGFloat
             if edgeVisibility == .hidden {
                 guard isRevealConnected, revealOpacity > 0 else { continue }
@@ -49,6 +50,12 @@ struct CGCanvasRenderer: CanvasRenderer {
             } else {
                 effectiveVisibility = edgeVisibility
                 opacityScale = 1.0
+            }
+
+            // LOD: animated arrowheads turn into sub-pixel noise far out.
+            // Below 0.4× zoom, fall back to static rendering.
+            if effectiveVisibility == .animated && zoom < 0.4 {
+                effectiveVisibility = .staticVisible
             }
 
             guard let sourcePos = positions[edge.sourceID],
@@ -74,6 +81,7 @@ struct CGCanvasRenderer: CanvasRenderer {
                 at: canvasPos,
                 isSelected: selectedIDs.contains(node.id),
                 isHighlighted: highlightedNodeID == node.id,
+                showLabel: zoom >= 0.5,
                 in: context
             )
         }
@@ -242,6 +250,7 @@ struct CGCanvasRenderer: CanvasRenderer {
         at point: CGPoint,
         isSelected: Bool,
         isHighlighted: Bool,
+        showLabel: Bool,
         in context: CGContext
     ) {
         let radius = isSelected ? selectedNodeRadius : nodeRadius
@@ -260,6 +269,7 @@ struct CGCanvasRenderer: CanvasRenderer {
         context.setLineWidth(nodeBorderWidth)
         context.strokeEllipse(in: circleRect)
 
+        guard showLabel else { return }
         // Hover: shift the label down by 2pt as a quiet responsiveness cue.
         let labelExtraGap: CGFloat = isHighlighted ? 2 : 0
         drawLabel(

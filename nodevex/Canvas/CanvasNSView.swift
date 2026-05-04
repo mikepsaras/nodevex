@@ -48,7 +48,6 @@ final class CanvasNSView: NSView {
     private var reveal: RevealState?
     private var trackingArea: NSTrackingArea?
     private var lastModalFocusedNodeID: UUID?
-    private var lastLayoutMode: LayoutMode?
 
     /// Node hit on mouseDown. Consumed on mouseUp to decide whether to open
     /// the focus modal — cleared the moment a drag is detected so that a
@@ -76,17 +75,10 @@ final class CanvasNSView: NSView {
         graph: GraphSnapshot,
         selectedNodeIDs: Set<UUID>,
         modalFocusedNodeID: UUID?,
-        edgeVisibility: EdgeVisibilityMode,
-        layoutMode: LayoutMode
+        edgeVisibility: EdgeVisibilityMode
     ) {
-        let layoutModeChanged = lastLayoutMode != layoutMode
-        if layoutModeChanged {
-            layoutEngine.currentMode = layoutMode  // didSet reapplies graph
-            lastLayoutMode = layoutMode
-        }
-
         let signature = graphSignature(graph)
-        if signature != lastGraphSignature || layoutModeChanged {
+        if signature != lastGraphSignature {
             self.graph = graph
             layoutEngine.applyGraphChange(graph, seedOrigin: currentViewportCenterWorld())
             self.positions = layoutEngine.positions
@@ -170,6 +162,7 @@ final class CanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let zoom = enclosingScrollView?.magnification ?? 1.0
         renderer.draw(
             in: context,
             bounds: bounds,
@@ -180,7 +173,8 @@ final class CanvasNSView: NSView {
             revealedNodeID: reveal?.nodeID,
             revealOpacity: currentRevealOpacity,
             edgeVisibility: edgeVisibility,
-            animationPhase: animationPhase
+            animationPhase: animationPhase,
+            zoom: zoom
         )
     }
 
@@ -202,10 +196,9 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Timer drives four things: arrow flow on animated edges, hover-reveal
-        // fade transitions, the continuous force-physics tick, and applying
-        // the drag override (needed in hierarchical mode where `isActive` is
-        // false). Run while any of them is active.
+        // Timer drives three things: arrow flow on animated edges, hover-reveal
+        // fade transitions, and the continuous force-physics tick (which also
+        // applies the drag override). Run while any of them is active.
         if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive || layoutEngine.isDragging {
             startAnimationTimer()
         } else {
