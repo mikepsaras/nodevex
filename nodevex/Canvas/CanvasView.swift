@@ -51,7 +51,10 @@ struct CanvasView: NSViewRepresentable {
     func updateNSView(_ nsView: CanvasScrollView, context: Context) {
         context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
-        let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: categories)
+        // Sort edges by id so render order is stable across @Query refetches —
+        // otherwise overlapping edges flicker when SwiftData re-orders.
+        let sortedEdges = edges.sorted(by: { $0.id.uuidString < $1.id.uuidString })
+        let snapshot = GraphSnapshot(nodes: nodes, edges: sortedEdges, categories: categories)
         canvas.update(
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
