@@ -20,6 +20,9 @@ struct CGCanvasRenderer: CanvasRenderer {
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
         selectedIDs: Set<UUID>,
+        highlightedNodeID: UUID?,
+        revealedNodeID: UUID?,
+        revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat
     ) {
@@ -28,27 +31,51 @@ struct CGCanvasRenderer: CanvasRenderer {
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
 
-        if edgeVisibility != .hidden {
-            for edge in graph.edges {
-                guard let sourcePos = positions[edge.sourceID],
-                      let targetPos = positions[edge.targetID] else { continue }
-                let canvasSource = CGPoint(x: center.x + sourcePos.x, y: center.y + sourcePos.y)
-                let canvasTarget = CGPoint(x: center.x + targetPos.x, y: center.y + targetPos.y)
-                drawEdge(
-                    edge,
-                    from: canvasSource,
-                    to: canvasTarget,
-                    visibility: edgeVisibility,
-                    animationPhase: animationPhase,
-                    in: context
-                )
+        // Edge rendering: when global mode is hidden, only edges connected to
+        // a hover/modal-revealed node draw, and they animate at `revealOpacity`.
+        // When global mode is non-hidden (the experimental edge-visibility
+        // toggle), render every edge per that mode — hover does nothing
+        // additive there.
+        for edge in graph.edges {
+            let isRevealConnected = revealedNodeID != nil &&
+                (edge.sourceID == revealedNodeID || edge.targetID == revealedNodeID)
+
+            let effectiveVisibility: EdgeVisibilityMode
+            let opacityScale: CGFloat
+            if edgeVisibility == .hidden {
+                guard isRevealConnected, revealOpacity > 0 else { continue }
+                effectiveVisibility = .animated
+                opacityScale = revealOpacity
+            } else {
+                effectiveVisibility = edgeVisibility
+                opacityScale = 1.0
             }
+
+            guard let sourcePos = positions[edge.sourceID],
+                  let targetPos = positions[edge.targetID] else { continue }
+            let canvasSource = CGPoint(x: center.x + sourcePos.x, y: center.y + sourcePos.y)
+            let canvasTarget = CGPoint(x: center.x + targetPos.x, y: center.y + targetPos.y)
+            drawEdge(
+                edge,
+                from: canvasSource,
+                to: canvasTarget,
+                visibility: effectiveVisibility,
+                opacityScale: opacityScale,
+                animationPhase: animationPhase,
+                in: context
+            )
         }
 
         for node in graph.nodes {
             guard let pos = positions[node.id] else { continue }
             let canvasPos = CGPoint(x: center.x + pos.x, y: center.y + pos.y)
-            drawNode(node, at: canvasPos, isSelected: selectedIDs.contains(node.id), in: context)
+            drawNode(
+                node,
+                at: canvasPos,
+                isSelected: selectedIDs.contains(node.id),
+                isHighlighted: highlightedNodeID == node.id,
+                in: context
+            )
         }
     }
 
@@ -57,6 +84,7 @@ struct CGCanvasRenderer: CanvasRenderer {
         from sourcePos: CGPoint,
         to targetPos: CGPoint,
         visibility: EdgeVisibilityMode,
+        opacityScale: CGFloat,
         animationPhase: CGFloat,
         in context: CGContext
     ) {
@@ -78,7 +106,7 @@ struct CGCanvasRenderer: CanvasRenderer {
             y: targetPos.y - unitY * endInset
         )
 
-        let color = edgeColor(for: edge.valence)
+        let color = edgeColor(for: edge.valence).withAlphaComponent(opacityScale)
 
         // Line ends at arrow base in static mode (so the triangle is "added on"
         // with no overlap). In animated mode, line goes the full length and
@@ -134,7 +162,7 @@ struct CGCanvasRenderer: CanvasRenderer {
                     opacity = 1.0
                 }
                 let smoothed = opacity * opacity * (3 - 2 * opacity)
-                let fadedColor = color.withAlphaComponent(smoothed)
+                let fadedColor = color.withAlphaComponent(smoothed * opacityScale)
                 drawArrowhead(
                     at: arrowPos,
                     direction: (unitX, unitY),
@@ -185,7 +213,13 @@ struct CGCanvasRenderer: CanvasRenderer {
         }
     }
 
-    private func drawNode(_ node: Node, at point: CGPoint, isSelected: Bool, in context: CGContext) {
+    private func drawNode(
+        _ node: Node,
+        at point: CGPoint,
+        isSelected: Bool,
+        isHighlighted: Bool,
+        in context: CGContext
+    ) {
         let radius = isSelected ? selectedNodeRadius : nodeRadius
         let circleRect = CGRect(
             x: point.x - radius,
@@ -194,7 +228,7 @@ struct CGCanvasRenderer: CanvasRenderer {
             height: radius * 2
         )
 
-        let fill = nodeFillColor(for: node, isSelected: isSelected)
+        let fill = nodeFillColor(for: node, isSelected: isSelected, isHighlighted: isHighlighted)
         context.setFillColor(fill.cgColor)
         context.fillEllipse(in: circleRect)
 
@@ -206,7 +240,15 @@ struct CGCanvasRenderer: CanvasRenderer {
             drawPinGlyph(at: point, nodeRadius: radius, in: context)
         }
 
-        drawLabel(node.name, below: point, radius: radius, isSelected: isSelected)
+        // Hover: shift the label down by 2pt as a quiet responsiveness cue.
+        let labelExtraGap: CGFloat = isHighlighted ? 2 : 0
+        drawLabel(
+            node.name,
+            below: point,
+            radius: radius,
+            isSelected: isSelected,
+            extraGap: labelExtraGap
+        )
     }
 
     /// A barely-there pin marker at the upper-right of the node circle: a small
@@ -238,17 +280,27 @@ struct CGCanvasRenderer: CanvasRenderer {
         context.strokePath()
     }
 
-    private func nodeFillColor(for node: Node, isSelected: Bool) -> NSColor {
+    private func nodeFillColor(for node: Node, isSelected: Bool, isHighlighted: Bool) -> NSColor {
         if isSelected {
             return .controlAccentColor
         }
+        let base: NSColor
         if let firstCategory = node.categories.first {
-            return firstCategory.nsDisplayColor
+            base = firstCategory.nsDisplayColor
+        } else {
+            base = .secondaryLabelColor
         }
-        return .secondaryLabelColor
+        // Hover lifts the fill toward white for a "lit" feeling.
+        return isHighlighted ? (base.blended(withFraction: 0.35, of: .white) ?? base) : base
     }
 
-    private func drawLabel(_ text: String, below point: CGPoint, radius: CGFloat, isSelected: Bool) {
+    private func drawLabel(
+        _ text: String,
+        below point: CGPoint,
+        radius: CGFloat,
+        isSelected: Bool,
+        extraGap: CGFloat
+    ) {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byTruncatingTail
         paragraphStyle.alignment = .center
@@ -269,7 +321,7 @@ struct CGCanvasRenderer: CanvasRenderer {
         ).size
         let labelRect = CGRect(
             x: point.x - labelMaxWidth / 2,
-            y: point.y + radius + labelGap,
+            y: point.y + radius + labelGap + extraGap,
             width: labelMaxWidth,
             height: textSize.height
         )

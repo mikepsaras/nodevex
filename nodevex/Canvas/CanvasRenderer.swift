@@ -8,6 +8,9 @@ protocol CanvasRenderer {
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
         selectedIDs: Set<UUID>,
+        highlightedNodeID: UUID?,
+        revealedNodeID: UUID?,
+        revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat
     )

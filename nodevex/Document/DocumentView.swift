@@ -9,7 +9,7 @@ struct DocumentView: View {
     @State private var pendingFocusNodeID: UUID?
     @State private var selectedNodeIDs: Set<UUID> = []
     @State private var focusedNodeID: UUID?
-    @State private var edgeVisibility: EdgeVisibilityMode = .animated
+    @State private var edgeVisibility: EdgeVisibilityMode = .hidden
 
     private var focusedNode: Node? {
         guard let focusedNodeID else { return nil }
@@ -27,6 +27,7 @@ struct DocumentView: View {
             CanvasView(
                 selectedNodeIDs: $selectedNodeIDs,
                 edgeVisibility: edgeVisibility,
+                modalFocusedNodeID: focusedNodeID,
                 onNodeFocus: { focusedNodeID = $0 }
             )
             .overlay(alignment: .bottomLeading) {

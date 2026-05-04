@@ -5,6 +5,7 @@ import AppKit
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
     var edgeVisibility: EdgeVisibilityMode
+    var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
     @Query private var nodes: [Node]
     @Query private var edges: [Edge]
@@ -53,6 +54,7 @@ struct CanvasView: NSViewRepresentable {
         canvas.update(
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
+            modalFocusedNodeID: modalFocusedNodeID,
             edgeVisibility: edgeVisibility
         )
     }
