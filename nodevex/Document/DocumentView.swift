@@ -67,6 +67,20 @@ struct DocumentView: View {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .opacity(0)
         }
+        .onChange(of: editingNodeID) { oldValue, newValue in
+            // After a commit, if the selection has moved to a different
+            // node, jump editing there. Lets the user click another row
+            // (or canvas node) and hit Return to continue renaming without
+            // breaking stride.
+            guard newValue == nil,
+                  let oldEdit = oldValue,
+                  selectedNodeIDs.count == 1,
+                  let selectedId = selectedNodeIDs.first,
+                  selectedId != oldEdit else { return }
+            DispatchQueue.main.async {
+                editingNodeID = selectedId
+            }
+        }
     }
 
     private func runGraphAnalysis() {

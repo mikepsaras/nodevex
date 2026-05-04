@@ -20,7 +20,13 @@ struct NodeListView: View {
                     isSelected: selectedNodeIDs.contains(node.id),
                     isEditing: editingNodeID == node.id,
                     onSelect: { onSelect(node.id) },
-                    onCommitEdit: { editingNodeID = nil },
+                    onCommitEdit: {
+                        // Only clear if we're still pointing at this node —
+                        // guards against a stale field commit (e.g., a
+                        // dismantled InlineEditField firing didEndEditing
+                        // after editingNodeID has already advanced).
+                        if editingNodeID == node.id { editingNodeID = nil }
+                    },
                     onDelete: { NodeCommands.deleteNode(node, in: modelContext) }
                 )
             }
