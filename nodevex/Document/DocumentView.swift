@@ -23,7 +23,15 @@ struct DocumentView: View {
                 onCreateNode: createNewNode,
                 editingNodeID: $editingNodeID,
                 selectedNodeIDs: selectedNodeIDs,
-                onSelectNode: { selectedNodeIDs = [$0] }
+                onSelectNode: { id in
+                    // Picking a different row also commits any in-progress
+                    // edit. Without this the click doesn't defocus the
+                    // editing NSTextField, so the user would hit Return
+                    // once to commit and a second time to edit the newly
+                    // selected node.
+                    if editingNodeID != id { editingNodeID = nil }
+                    selectedNodeIDs = [id]
+                }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
