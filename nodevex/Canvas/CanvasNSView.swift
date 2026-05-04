@@ -191,10 +191,11 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Timer drives three things: arrow flow on animated edges, hover-reveal
-        // fade transitions, and the continuous force-physics tick. Run while
-        // any of them is active.
-        if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive {
+        // Timer drives four things: arrow flow on animated edges, hover-reveal
+        // fade transitions, the continuous force-physics tick, and applying
+        // the drag override (needed in hierarchical mode where `isActive` is
+        // false). Run while any of them is active.
+        if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive || layoutEngine.isDragging {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -221,7 +222,7 @@ final class CanvasNSView: NSView {
             // If physics finished settling but other animations are still
             // active, we keep ticking; if everything's quiet, recompute the
             // timer state.
-            if !self.layoutEngine.isActive && self.edgeVisibility != .animated && self.reveal == nil {
+            if !self.layoutEngine.isActive && !self.layoutEngine.isDragging && self.edgeVisibility != .animated && self.reveal == nil {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -321,9 +322,8 @@ final class CanvasNSView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard var state = dragState else { return }
         let cursorInView = convert(event.locationInWindow, from: nil)
-        // Clamp the cursor to the visible viewport in canvas-local coords —
-        // matches what the user observed in Obsidian: the dragged node sticks
-        // to the viewport edge if the cursor crosses it.
+        // Clamp the cursor to the visible viewport in canvas-local coords so
+        // the dragged node sticks to the viewport edge if the cursor crosses it.
         let clampedView = clampToVisibleViewport(cursorInView)
         let canvasPoint = CGPoint(
             x: clampedView.x - bounds.midX,
@@ -351,8 +351,7 @@ final class CanvasNSView: NSView {
         }
 
         dragState = state
-        // Keep the timer awake — startDrag/updateDrag bumped alpha but the
-        // animation timer might not yet be running if we were idle.
+        // Keep the timer awake so the drag override applies each tick.
         updateAnimationTimer()
     }
 

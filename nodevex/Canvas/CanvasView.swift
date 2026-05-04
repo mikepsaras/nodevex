@@ -14,6 +14,7 @@ struct CanvasView: NSViewRepresentable {
     // order is what makes layouts predictable.
     @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
+    @Query private var categories: [Category]
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -22,10 +23,10 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
         scrollView.allowsMagnification = true
-        // Asymmetric zoom range — Obsidian-like. Capped zoom-in keeps a
-        // single node from filling the screen and losing context; the
-        // wide zoom-out range lets the user shrink even a small graph
-        // down to a "constellation of dots" for orientation.
+        // Asymmetric zoom range. Capped zoom-in keeps a single node from
+        // filling the screen and losing context; the wide zoom-out range
+        // lets the user shrink even a small graph down to a "constellation
+        // of dots" for orientation.
         scrollView.maxMagnification = 2.0
         scrollView.minMagnification = 0.05
         scrollView.hasHorizontalScroller = false
@@ -50,7 +51,7 @@ struct CanvasView: NSViewRepresentable {
     func updateNSView(_ nsView: CanvasScrollView, context: Context) {
         context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
-        let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: [])
+        let snapshot = GraphSnapshot(nodes: nodes, edges: edges, categories: categories)
         canvas.update(
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
