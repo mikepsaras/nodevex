@@ -25,27 +25,18 @@ struct ForceDirectedLayout {
     /// ^ (1/3)`, so 0.5 puts it around 150pt vs 0.08's ~280pt.
     private let categoryClusterStrength: CGFloat = 0.5
     private let safetyRadius: CGFloat = 600
-    /// Velocity damping per tick (D3-force convention: `v *= 1 -
-    /// velocityDecay`). 0.4 means 40% damped per tick, 60% retained.
     private let velocityDecay: CGFloat = 0.4
-    /// Cap on per-tick force magnitude before it's added to velocity. The
-    /// raw force values from inverse-square repulsion / spring attraction
-    /// are huge at close range; capping per-tick acceleration is what makes
-    /// continuous-physics motion read as smooth animation rather than
-    /// instantaneous teleport.
     private let maxForcePerTick: CGFloat = 4
 
     /// One physics tick. Computes forces (Fruchterman-Reingold), accumulates
     /// them into per-node velocities (with friction), and integrates position
-    /// from velocity. The dragged node's position is overridden to the cursor
-    /// — forces still emanate from it, but it doesn't move under them.
+    /// from velocity. Dragging is handled at the `LayoutEngine` level (the
+    /// engine skips this method entirely while a drag is active).
     func advance(
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
         velocities: [UUID: CGPoint],
-        alpha: Double,
-        draggedNodeID: UUID?,
-        draggedNodePosition: CGPoint?
+        alpha: Double
     ) -> (positions: [UUID: CGPoint], velocities: [UUID: CGPoint]) {
         guard !graph.nodes.isEmpty else { return (positions, velocities) }
         let nodeCount = graph.nodes.count
@@ -135,11 +126,6 @@ struct ForceDirectedLayout {
         // friction) → step position by velocity. Velocity carries momentum
         // across ticks but decays, which damps oscillation around equilibrium.
         for node in graph.nodes {
-            if node.id == draggedNodeID, let dragPos = draggedNodePosition {
-                positions[node.id] = dragPos
-                velocities[node.id] = .zero  // dragged node has no inertia
-                continue
-            }
             guard let pos = positions[node.id], let disp = displacements[node.id] else { continue }
             let dispMag = max(sqrt(disp.x * disp.x + disp.y * disp.y), 0.001)
             let limited = min(dispMag, maxForcePerTick)

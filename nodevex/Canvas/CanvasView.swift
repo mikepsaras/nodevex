@@ -22,7 +22,12 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
         scrollView.allowsMagnification = true
-        scrollView.maxMagnification = 4.0
+        // Asymmetric zoom range — Obsidian-like. Capped zoom-in keeps a
+        // single node from filling the screen and losing context; the
+        // wide zoom-out range lets the user shrink even a small graph
+        // down to a "constellation of dots" for orientation.
+        scrollView.maxMagnification = 2.0
+        scrollView.minMagnification = 0.05
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
         scrollView.verticalScrollElasticity = .allowed
@@ -123,20 +128,12 @@ final class CanvasScrollView: NSScrollView {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true
         }
-        let viewportSize = contentView.frame.size
-        guard viewportSize.width > 0, viewportSize.height > 0 else { return }
-        let widthRatio = viewportSize.width / canvasSize.width
-        let heightRatio = viewportSize.height / canvasSize.height
-        let computedMin = min(max(widthRatio, heightRatio), 1.0)
-        let oldMin = minMagnification
-        if abs(minMagnification - computedMin) > 0.01 {
-            minMagnification = computedMin
-            if computedMin > oldMin && magnification < computedMin {
-                magnification = computedMin
-            }
-        }
+        // minMagnification is now a fixed floor (set in CanvasView.makeNSView)
+        // — we no longer compute it from the viewport-vs-canvas ratio. This
+        // gives the user the wide asymmetric zoom-out range they wanted; the
+        // floor at 0.05 stops things from disappearing entirely.
         if !hasAppliedInitialZoom {
-            magnification = computedMin
+            magnification = 1.0
             hasAppliedInitialZoom = true
         }
     }

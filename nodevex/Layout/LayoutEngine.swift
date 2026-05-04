@@ -24,18 +24,9 @@ final class LayoutEngine {
         }
     }
 
-    /// Simulation energy. 1.0 = high motion, decays toward `alphaTarget`
-    /// (not zero) so the sim never fully freezes — connected nodes keep
-    /// drifting gently rather than locking into rigid positions.
     private(set) var alpha: Double = 0
     private let alphaDecay: Double = 0.96
-    /// Floor that alpha asymptotes to. Keeps the simulation alive at very
-    /// low energy so the graph reads as fluid rather than static.
     private let alphaTarget: Double = 0.05
-    /// Initial alpha for graph-change perturbations. Slightly below the
-    /// drag-release reset so adding a node / assigning a category settles
-    /// gradually — but high enough that integrated cluster pull over the
-    /// settle period actually moves things into formation.
     private let alphaOnGraphChange: Double = 0.7
 
     private var draggedNodeID: UUID?
@@ -75,24 +66,28 @@ final class LayoutEngine {
         }
     }
 
-    /// One physics step. Always returns true while in force-directed mode —
-    /// the simulation runs continuously, with alpha decaying toward
-    /// `alphaTarget` rather than zero.
+    /// One physics step. While dragging, the rest of the graph is frozen —
+    /// only the dragged node updates (override to cursor). This preserves the
+    /// pre-drag equilibrium so on release the node has its full drag distance
+    /// to traverse at the (low) floor velocity, producing a visible pull-back.
     @discardableResult
     func tick() -> Bool {
         guard let graph = lastGraph, isActive else { return false }
+
+        if let nodeID = draggedNodeID, let pos = draggedNodePosition {
+            positions[nodeID] = pos
+            velocities[nodeID] = .zero
+            return true
+        }
+
         let result = forceLayout.advance(
             graph: graph,
             positions: positions,
             velocities: velocities,
-            alpha: alpha,
-            draggedNodeID: draggedNodeID,
-            draggedNodePosition: draggedNodePosition
+            alpha: alpha
         )
         positions = result.positions
         velocities = result.velocities
-        // Asymptote toward alphaTarget instead of zero — so alpha never
-        // crosses below the floor, simulation stays alive at low energy.
         alpha = alphaTarget + (alpha - alphaTarget) * alphaDecay
         return true
     }
@@ -100,24 +95,18 @@ final class LayoutEngine {
     func startDrag(nodeID: UUID, position: CGPoint) {
         draggedNodeID = nodeID
         draggedNodePosition = position
-        // Wake the simulation so neighbors react to the perturbation in real
-        // time. While the drag is held, the dragged node's position is
-        // overwritten each tick.
-        alpha = 1.0
     }
 
     func updateDrag(position: CGPoint) {
         draggedNodePosition = position
-        // Keep the sim energetic so neighbors track the moving cursor.
-        alpha = max(alpha, 0.5)
     }
 
     func endDrag() {
         draggedNodeID = nil
         draggedNodePosition = nil
-        // Inject energy so the residual sim pulls the node back toward
-        // equilibrium, matching the Obsidian-graph drag-back feel.
-        alpha = max(alpha, 0.7)
+        // Drop alpha to the floor so pull-back is at the gentle drift velocity
+        // regardless of how energetic the sim was before/during the drag.
+        alpha = alphaTarget
     }
 
     private func applyModeSwitch() {

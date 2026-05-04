@@ -50,10 +50,22 @@ final class CanvasNSView: NSView {
     private var lastModalFocusedNodeID: UUID?
     private var lastLayoutMode: LayoutMode?
 
-    /// Node hit on mouseDown, consumed on mouseUp to decide whether to open
-    /// the focus modal. Drag will get its own state when it's rebuilt around
-    /// continuous physics in a follow-up commit.
+    /// Node hit on mouseDown. Consumed on mouseUp to decide whether to open
+    /// the focus modal — cleared the moment a drag is detected so that a
+    /// click-then-drag doesn't *also* fire the modal on release.
     private var pendingClickNodeID: UUID?
+
+    /// Drag bookkeeping. The cursor's canvas-relative point at mouseDown,
+    /// the dragged node's position at that moment, and a flag for whether
+    /// motion has crossed the click→drag threshold.
+    private struct DragState {
+        let nodeID: UUID
+        let downCanvasPoint: CGPoint
+        let originalNodePosition: CGPoint
+        var didCrossThreshold: Bool
+    }
+    private var dragState: DragState?
+    private let dragThreshold: CGFloat = 3
 
     deinit {
         animationTimer?.invalidate()
@@ -268,10 +280,19 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
-        // Remember the hit node so mouseUp can route a plain click to the
-        // focus modal. Drag interaction is handled separately when it's
-        // rebuilt around continuous physics.
+        // Track click + drag intent in parallel. mouseUp picks the right one
+        // based on whether motion crossed the drag threshold.
         pendingClickNodeID = hitID
+        if let hitID, let originalPos = positions[hitID] {
+            dragState = DragState(
+                nodeID: hitID,
+                downCanvasPoint: canvasPoint,
+                originalNodePosition: originalPos,
+                didCrossThreshold: false
+            )
+        } else {
+            dragState = nil
+        }
 
         // Plain click no longer selects — it opens the focus modal on mouseUp.
         // Selection requires shift (add) or command (toggle). Click on empty
@@ -297,8 +318,57 @@ final class CanvasNSView: NSView {
         onSelectionChange?(newSelection)
     }
 
+    override func mouseDragged(with event: NSEvent) {
+        guard var state = dragState else { return }
+        let cursorInView = convert(event.locationInWindow, from: nil)
+        // Clamp the cursor to the visible viewport in canvas-local coords —
+        // matches what the user observed in Obsidian: the dragged node sticks
+        // to the viewport edge if the cursor crosses it.
+        let clampedView = clampToVisibleViewport(cursorInView)
+        let canvasPoint = CGPoint(
+            x: clampedView.x - bounds.midX,
+            y: clampedView.y - bounds.midY
+        )
+        let dx = canvasPoint.x - state.downCanvasPoint.x
+        let dy = canvasPoint.y - state.downCanvasPoint.y
+        let nodePosition = CGPoint(
+            x: state.originalNodePosition.x + dx,
+            y: state.originalNodePosition.y + dy
+        )
+
+        if !state.didCrossThreshold && (dx * dx + dy * dy) > dragThreshold * dragThreshold {
+            state.didCrossThreshold = true
+            // Crossing the threshold means this is a drag, not a click.
+            // Cancel the modal-open path and notify the engine so the dragged
+            // node's position is overridden each tick while neighbors react
+            // to it via the regular forces.
+            pendingClickNodeID = nil
+            layoutEngine.startDrag(nodeID: state.nodeID, position: nodePosition)
+            // Suppress hover/highlight while dragging.
+            updateHover(target: nil)
+        } else if state.didCrossThreshold {
+            layoutEngine.updateDrag(position: nodePosition)
+        }
+
+        dragState = state
+        // Keep the timer awake — startDrag/updateDrag bumped alpha but the
+        // animation timer might not yet be running if we were idle.
+        updateAnimationTimer()
+    }
+
     override func mouseUp(with event: NSEvent) {
-        defer { pendingClickNodeID = nil }
+        defer {
+            dragState = nil
+            pendingClickNodeID = nil
+        }
+
+        if let state = dragState, state.didCrossThreshold {
+            // Drag end — clear the engine's fix and let residual alpha pull
+            // the node back toward force equilibrium.
+            layoutEngine.endDrag()
+            return
+        }
+
         guard let nodeID = pendingClickNodeID else { return }
         let modifiers = event.modifierFlags
         if modifiers.isDisjoint(with: [.shift, .command, .option]) {
@@ -306,7 +376,25 @@ final class CanvasNSView: NSView {
         }
     }
 
+    /// Clamp a point in this view's coords to the enclosing scroll view's
+    /// visible region. Used during drag so the dragged node sticks to the
+    /// viewport edge when the cursor goes past it.
+    private func clampToVisibleViewport(_ point: CGPoint) -> CGPoint {
+        guard let scrollView = enclosingScrollView else { return point }
+        let visibleRect = scrollView.contentView.bounds
+        return CGPoint(
+            x: min(max(point.x, visibleRect.minX), visibleRect.maxX),
+            y: min(max(point.y, visibleRect.minY), visibleRect.maxY)
+        )
+    }
+
     override func mouseMoved(with event: NSEvent) {
+        // Don't reveal during a drag — the user is busy with another gesture.
+        // (mouseMoved typically doesn't fire during a drag, but be explicit.)
+        if dragState?.didCrossThreshold == true {
+            updateHover(target: nil)
+            return
+        }
         let pointInView = convert(event.locationInWindow, from: nil)
         let canvasPoint = CGPoint(
             x: pointInView.x - bounds.midX,
