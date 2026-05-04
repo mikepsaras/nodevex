@@ -5,13 +5,8 @@ import AppKit
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
     var edgeVisibility: EdgeVisibilityMode
-    var layoutMode: LayoutMode
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
-    // Sort by createdAt forward so the canvas processes nodes in creation
-    // order. Hierarchical layout's barycenter sort treats isolated nodes'
-    // position in the input array as their tie-break score, so a stable input
-    // order is what makes layouts predictable.
     @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
@@ -23,12 +18,8 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
         scrollView.allowsMagnification = true
-        // Asymmetric zoom range. Capped zoom-in keeps a single node from
-        // filling the screen and losing context; the wide zoom-out range
-        // lets the user shrink even a small graph down to a "constellation
-        // of dots" for orientation.
-        scrollView.maxMagnification = 2.0
-        scrollView.minMagnification = 0.05
+        scrollView.minMagnification = 0.25
+        scrollView.maxMagnification = 4.0
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
         scrollView.verticalScrollElasticity = .allowed
@@ -59,8 +50,7 @@ struct CanvasView: NSViewRepresentable {
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
             modalFocusedNodeID: modalFocusedNodeID,
-            edgeVisibility: edgeVisibility,
-            layoutMode: layoutMode
+            edgeVisibility: edgeVisibility
         )
     }
 
@@ -73,50 +63,12 @@ struct CanvasView: NSViewRepresentable {
 }
 
 final class CanvasScrollView: NSScrollView {
-    private let canvasMultiplier: CGFloat = 1.5
-    private var canvasSize: NSSize = .zero
-    private var screenObserver: NSObjectProtocol?
+    /// Fixed 100k × 100k document area — effectively infinite at any
+    /// reasonable zoom level. Node positions are canvas-center-relative, so
+    /// the geometric midpoint is the world origin.
+    private let canvasSize = NSSize(width: 100_000, height: 100_000)
     private var isAdjusting = false
     private var hasAppliedInitialZoom = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        commonInit()
-    }
-
-    deinit {
-        if let observer = screenObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-    }
-
-    private func commonInit() {
-        recomputeCanvasSize()
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.recomputeCanvasSize()
-            self?.needsLayout = true
-        }
-    }
-
-    private func recomputeCanvasSize() {
-        let largestScreen = NSScreen.screens.max(by: {
-            $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
-        }) ?? NSScreen.main
-        guard let screen = largestScreen else { return }
-        canvasSize = NSSize(
-            width: screen.frame.width * canvasMultiplier,
-            height: screen.frame.height * canvasMultiplier
-        )
-    }
 
     override func tile() {
         super.tile()
@@ -127,7 +79,7 @@ final class CanvasScrollView: NSScrollView {
     }
 
     private func applyCanvasAndMagnification() {
-        guard let documentView, canvasSize.width > 0, canvasSize.height > 0 else { return }
+        guard let documentView else { return }
         if documentView.frame.size != canvasSize {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true

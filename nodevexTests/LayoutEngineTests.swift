@@ -17,30 +17,13 @@ struct LayoutEngineTests {
         #expect(!engine.isDragging)
     }
 
-    @Test("drag override applies in force-directed mode")
-    func dragOverrideInForceDirected() {
+    @Test("drag override pins the dragged node to the target position")
+    func dragOverridePinsNode() {
         let engine = LayoutEngine()
-        engine.currentMode = .forceDirected
         let a = Node(name: "A")
         engine.applyGraphChange(GraphSnapshot(nodes: [a], edges: [], categories: []))
 
         let target = CGPoint(x: 123, y: -45)
-        engine.startDrag(nodeID: a.id, position: target)
-        engine.tick()
-        #expect(engine.positions[a.id] == target)
-    }
-
-    @Test("drag override applies in hierarchical mode")
-    func dragOverrideInHierarchical() {
-        // Regression: tick used to early-exit on !isActive, so drag silently
-        // did nothing in hierarchical mode. The fix moves the override above
-        // the isActive guard.
-        let engine = LayoutEngine()
-        engine.currentMode = .hierarchical
-        let a = Node(name: "A")
-        engine.applyGraphChange(GraphSnapshot(nodes: [a], edges: [], categories: []))
-
-        let target = CGPoint(x: 200, y: 100)
         engine.startDrag(nodeID: a.id, position: target)
         engine.tick()
         #expect(engine.positions[a.id] == target)
@@ -65,7 +48,6 @@ struct LayoutEngineTests {
         // origin. This is what makes new nodes spawn near the viewport
         // center rather than always at (0, 0).
         let engine = LayoutEngine()
-        engine.currentMode = .forceDirected
         let a = Node(name: "A")
         let snapshot = GraphSnapshot(nodes: [a], edges: [], categories: [])
         engine.applyGraphChange(snapshot, seedOrigin: CGPoint(x: 500, y: 300))

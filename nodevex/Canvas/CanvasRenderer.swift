@@ -12,6 +12,7 @@ protocol CanvasRenderer {
         revealedNodeID: UUID?,
         revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
-        animationPhase: CGFloat
+        animationPhase: CGFloat,
+        zoom: CGFloat
     )
 }

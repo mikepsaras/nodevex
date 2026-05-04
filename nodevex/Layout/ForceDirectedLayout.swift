@@ -10,8 +10,9 @@ import CoreGraphics
 /// - Inverse-square repulsion between all node pairs
 /// - Edge springs (attraction proportional to distance²)
 /// - Category clustering (Hooke-style attraction between same-category nodes)
-/// - Gentle gravity toward the world origin
-/// - Safety-radius backstop so nothing escapes the canvas
+/// - Gentle gravity toward the world origin (the only recentering force —
+///   the canvas is effectively infinite, so the graph self-centers via gravity
+///   rather than any hard clamp)
 struct ForceDirectedLayout {
     private let repulsionConstant: CGFloat = 1_800_000
     private let minRepulsionDistance: CGFloat = 25
@@ -24,7 +25,6 @@ struct ForceDirectedLayout {
     /// pair — the clustering equilibrium distance is ~`(repulsion / strength)
     /// ^ (1/3)`, so 0.5 puts it around 150pt vs 0.08's ~280pt.
     private let categoryClusterStrength: CGFloat = 0.5
-    private let safetyRadius: CGFloat = 600
     private let velocityDecay: CGFloat = 0.4
     private let maxForcePerTick: CGFloat = 4
 
@@ -136,18 +136,7 @@ struct ForceDirectedLayout {
             velocity.x = velocity.x * (1 - velocityDecay) + forceX * alphaCG
             velocity.y = velocity.y * (1 - velocityDecay) + forceY * alphaCG
 
-            var newPos = CGPoint(x: pos.x + velocity.x, y: pos.y + velocity.y)
-
-            // Safety-radius backstop. If we hit the boundary, kill velocity
-            // there too — otherwise nodes pile up against the wall and
-            // accumulate energy.
-            let mag = sqrt(newPos.x * newPos.x + newPos.y * newPos.y)
-            if mag > safetyRadius {
-                let scale = safetyRadius / mag
-                newPos = CGPoint(x: newPos.x * scale, y: newPos.y * scale)
-                velocity = .zero
-            }
-
+            let newPos = CGPoint(x: pos.x + velocity.x, y: pos.y + velocity.y)
             positions[node.id] = newPos
             velocities[node.id] = velocity
         }

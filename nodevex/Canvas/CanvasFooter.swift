@@ -2,27 +2,9 @@ import SwiftUI
 
 struct CanvasFooter: View {
     @Binding var edgeVisibility: EdgeVisibilityMode
-    @Binding var layoutMode: LayoutMode
 
     var body: some View {
-        HStack(spacing: 8) {
-            layoutMenu
-            visibilityMenu
-        }
-    }
-
-    private var layoutMenu: some View {
-        Menu {
-            ForEach(LayoutMode.allCases) { mode in
-                Button(mode.label) { layoutMode = mode }
-            }
-        } label: {
-            footerLabel(text: layoutMode.label)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .font(.caption)
-        .foregroundStyle(SemanticColors.textSecondary)
+        visibilityMenu
     }
 
     private var visibilityMenu: some View {
@@ -50,16 +32,5 @@ struct CanvasFooter: View {
         .buttonStyle(.plain)
         .font(.caption)
         .foregroundStyle(SemanticColors.textSecondary)
-    }
-
-    private func footerLabel(text: String) -> some View {
-        HStack(spacing: 4) {
-            Text(text)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.caption2)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 }

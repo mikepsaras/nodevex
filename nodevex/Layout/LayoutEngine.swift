@@ -1,10 +1,9 @@
 import Foundation
 import CoreGraphics
 
-/// Owns the live position state and runs whichever layout the user has
-/// selected. Force-directed runs as a continuous tick-based simulation —
-/// alpha-decayed, driven from CanvasNSView's animation timer. Hierarchical
-/// runs once as a batch when the graph changes or the mode is selected.
+/// Owns the live position state and runs the force simulation. Force-directed
+/// is the only layout — alpha-decayed continuous physics, driven from
+/// CanvasNSView's animation timer.
 ///
 /// Drag is a perturbation, not a commit. While dragging, the dragged node's
 /// position is overridden to the cursor (so it pulls neighbors via the same
@@ -17,12 +16,6 @@ import CoreGraphics
 final class LayoutEngine {
     private(set) var positions: [UUID: CGPoint] = [:]
     private var velocities: [UUID: CGPoint] = [:]
-    var currentMode: LayoutMode = .forceDirected {
-        didSet {
-            guard currentMode != oldValue else { return }
-            applyModeSwitch()
-        }
-    }
 
     private(set) var alpha: Double = 0
     private let alphaDecay: Double = 0.96
@@ -33,53 +26,39 @@ final class LayoutEngine {
     private var draggedNodePosition: CGPoint?
 
     private let forceLayout = ForceDirectedLayout()
-    private let hierarchicalLayout = HierarchicalLayout()
     private var lastGraph: GraphSnapshot?
 
-    /// True while in force-directed mode. With `alphaTarget > 0` the sim
-    /// never fully sleeps — the gentle continuous drift is the source of the
-    /// "fluid" feel. CanvasNSView gates its animation timer on this.
-    var isActive: Bool { currentMode == .forceDirected }
+    /// True once a graph has been applied — physics has something to simulate.
+    /// CanvasNSView gates its animation timer on this. With `alphaTarget > 0`
+    /// the sim never fully sleeps, so this stays true for the lifetime of the
+    /// view; the gentle continuous drift is the source of the "fluid" feel.
+    var isActive: Bool { lastGraph != nil }
 
-    /// True while a drag is in progress. CanvasNSView gates its timer on
-    /// this too so drag works in hierarchical mode (where `isActive` is
-    /// false and physics is otherwise dormant).
+    /// True while a drag is in progress. CanvasNSView gates its timer on this
+    /// too so drag overrides apply each tick.
     var isDragging: Bool { draggedNodeID != nil }
 
     /// Reseed positions for new/removed nodes, reset alpha so the sim has
     /// energy to settle the change. Keeps existing positions for nodes that
     /// were already present. `seedOrigin` is the canvas-center-relative point
-    /// new nodes should spawn around (in force-directed mode); hierarchical
-    /// ignores it.
+    /// new nodes should spawn around.
     func applyGraphChange(_ graph: GraphSnapshot, seedOrigin: CGPoint = .zero) {
         lastGraph = graph
-        switch currentMode {
-        case .forceDirected:
-            positions = forceLayout.seedPositions(
-                graph: graph,
-                previousPositions: positions,
-                seedOrigin: seedOrigin
-            )
-            // Drop velocities for nodes no longer present; new nodes start
-            // with zero velocity (the seed dictionary handles this implicitly).
-            velocities = velocities.filter { positions[$0.key] != nil }
-            alpha = alphaOnGraphChange
-        case .hierarchical:
-            positions = hierarchicalLayout.compute(
-                graph: graph,
-                previousPositions: positions
-            )
-            velocities.removeAll()  // hierarchical is stateless; clear physics state
-            alpha = 0
-        }
+        positions = forceLayout.seedPositions(
+            graph: graph,
+            previousPositions: positions,
+            seedOrigin: seedOrigin
+        )
+        // Drop velocities for nodes no longer present; new nodes start
+        // with zero velocity (the seed dictionary handles this implicitly).
+        velocities = velocities.filter { positions[$0.key] != nil }
+        alpha = alphaOnGraphChange
     }
 
     /// One physics step. While dragging, the rest of the graph is frozen —
     /// only the dragged node updates (override to cursor). This preserves the
     /// pre-drag equilibrium so on release the node has its full drag distance
     /// to traverse at the (low) floor velocity, producing a visible pull-back.
-    /// Drag override runs regardless of mode so dragging still works in
-    /// hierarchical (where physics is otherwise off).
     @discardableResult
     func tick() -> Bool {
         if let nodeID = draggedNodeID, let pos = draggedNodePosition {
@@ -88,7 +67,7 @@ final class LayoutEngine {
             return true
         }
 
-        guard let graph = lastGraph, isActive else { return false }
+        guard let graph = lastGraph else { return false }
 
         let result = forceLayout.advance(
             graph: graph,
@@ -117,10 +96,5 @@ final class LayoutEngine {
         // Drop alpha to the floor so pull-back is at the gentle drift velocity
         // regardless of how energetic the sim was before/during the drag.
         alpha = alphaTarget
-    }
-
-    private func applyModeSwitch() {
-        guard let lastGraph else { return }
-        applyGraphChange(lastGraph)
     }
 }
