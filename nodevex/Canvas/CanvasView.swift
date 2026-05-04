@@ -128,12 +128,17 @@ final class CanvasScrollView: NSScrollView {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true
         }
-        // minMagnification is now a fixed floor (set in CanvasView.makeNSView)
-        // — we no longer compute it from the viewport-vs-canvas ratio. This
-        // gives the user the wide asymmetric zoom-out range they wanted; the
-        // floor at 0.05 stops things from disappearing entirely.
         if !hasAppliedInitialZoom {
             magnification = 1.0
+            // Center the viewport on the canvas's geometric midpoint. Node
+            // positions are stored relative to canvas center, so without this
+            // the user sees the canvas's empty top-left corner on launch
+            // while every actual node sits behind the scroll boundary.
+            let viewportSize = contentView.frame.size
+            let scrollX = canvasSize.width / 2 - viewportSize.width / 2
+            let scrollY = canvasSize.height / 2 - viewportSize.height / 2
+            contentView.scroll(to: NSPoint(x: max(0, scrollX), y: max(0, scrollY)))
+            reflectScrolledClipView(contentView)
             hasAppliedInitialZoom = true
         }
     }
