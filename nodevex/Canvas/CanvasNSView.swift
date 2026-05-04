@@ -72,7 +72,6 @@ final class CanvasNSView: NSView {
         hoverDelayTimer?.invalidate()
     }
 
-    @MainActor
     func update(
         graph: GraphSnapshot,
         selectedNodeIDs: Set<UUID>,
