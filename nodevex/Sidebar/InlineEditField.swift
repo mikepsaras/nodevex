@@ -17,14 +17,26 @@ struct InlineEditField: NSViewRepresentable {
         let field = NSTextField()
         field.isBordered = false
         field.isBezeled = false
+        field.bezelStyle = .squareBezel
         field.drawsBackground = false
         field.backgroundColor = .clear
         field.focusRingType = .none
         field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        field.cell?.usesSingleLineMode = true
-        field.cell?.lineBreakMode = .byTruncatingTail
         field.delegate = context.coordinator
         field.stringValue = text
+
+        // Belt-and-suspenders: cell properties on NSTextFieldCell don't
+        // always inherit cleanly from the field, so configure them too.
+        if let cell = field.cell as? NSTextFieldCell {
+            cell.isBordered = false
+            cell.isBezeled = false
+            cell.drawsBackground = false
+            cell.backgroundColor = .clear
+            cell.focusRingType = .none
+            cell.usesSingleLineMode = true
+            cell.lineBreakMode = .byTruncatingTail
+        }
+
         return field
     }
 
@@ -37,11 +49,13 @@ struct InlineEditField: NSViewRepresentable {
             context.coordinator.shouldFocus = false
             DispatchQueue.main.async {
                 nsView.window?.makeFirstResponder(nsView)
-                // Place cursor at end rather than selecting all — selectAll
-                // draws a text-selection highlight rectangle that reads as
-                // an "input box" inside the row. ⌘A still selects manually
-                // if the user wants to replace the whole name.
-                if let editor = nsView.currentEditor() {
+                // The field editor is a window-shared NSTextView that AppKit
+                // installs into the field on focus. Its drawsBackground
+                // defaults to true and paints over the row tint — that's the
+                // "ugly box". Force it transparent here, after focus is set.
+                if let editor = nsView.currentEditor() as? NSTextView {
+                    editor.drawsBackground = false
+                    editor.backgroundColor = .clear
                     let length = (editor.string as NSString).length
                     editor.selectedRange = NSRange(location: length, length: 0)
                 }
