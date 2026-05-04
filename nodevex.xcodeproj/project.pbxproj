@@ -6,11 +6,27 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		277AABF12FA8D57400878909 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 27AA6C982FA77CF300AED932 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 27AA6C9F2FA77CF300AED932;
+			remoteInfo = nodevex;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		277AABED2FA8D57400878909 /* nodevexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = nodevexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		27AA6CA02FA77CF300AED932 /* nodevex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = nodevex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		277AABEE2FA8D57400878909 /* nodevexTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = nodevexTests;
+			sourceTree = "<group>";
+		};
 		27AA6CA22FA77CF300AED932 /* nodevex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = nodevex;
@@ -19,6 +35,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		277AABEA2FA8D57400878909 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		27AA6C9D2FA77CF300AED932 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				27AA6CA22FA77CF300AED932 /* nodevex */,
+				277AABEE2FA8D57400878909 /* nodevexTests */,
 				27AA6CA12FA77CF300AED932 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				27AA6CA02FA77CF300AED932 /* nodevex.app */,
+				277AABED2FA8D57400878909 /* nodevexTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +73,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		277AABEC2FA8D57400878909 /* nodevexTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "nodevexTests" */;
+			buildPhases = (
+				277AABE92FA8D57400878909 /* Sources */,
+				277AABEA2FA8D57400878909 /* Frameworks */,
+				277AABEB2FA8D57400878909 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				277AABF22FA8D57400878909 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				277AABEE2FA8D57400878909 /* nodevexTests */,
+			);
+			name = nodevexTests;
+			packageProductDependencies = (
+			);
+			productName = nodevexTests;
+			productReference = 277AABED2FA8D57400878909 /* nodevexTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		27AA6C9F2FA77CF300AED932 /* nodevex */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 27AA6CAB2FA77CF400AED932 /* Build configuration list for PBXNativeTarget "nodevex" */;
@@ -80,6 +128,10 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					277AABEC2FA8D57400878909 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 27AA6C9F2FA77CF300AED932;
+					};
 					27AA6C9F2FA77CF300AED932 = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
@@ -100,11 +152,19 @@
 			projectRoot = "";
 			targets = (
 				27AA6C9F2FA77CF300AED932 /* nodevex */,
+				277AABEC2FA8D57400878909 /* nodevexTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		277AABEB2FA8D57400878909 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		27AA6C9E2FA77CF300AED932 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +175,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		277AABE92FA8D57400878909 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		27AA6C9C2FA77CF300AED932 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +191,55 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		277AABF22FA8D57400878909 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 27AA6C9F2FA77CF300AED932 /* nodevex */;
+			targetProxy = 277AABF12FA8D57400878909 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		277AABF32FA8D57400878909 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KCWY4Y9L53;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevexTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nodevex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nodevex";
+			};
+			name = Debug;
+		};
+		277AABF42FA8D57400878909 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KCWY4Y9L53;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevexTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nodevex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nodevex";
+			};
+			name = Release;
+		};
 		27AA6CA92FA77CF400AED932 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -312,6 +427,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "nodevexTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				277AABF32FA8D57400878909 /* Debug */,
+				277AABF42FA8D57400878909 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		27AA6C9B2FA77CF300AED932 /* Build configuration list for PBXProject "nodevex" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
