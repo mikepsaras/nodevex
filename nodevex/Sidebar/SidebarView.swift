@@ -5,12 +5,16 @@ struct SidebarView: View {
     @Environment(\.modelContext) private var modelContext
     let onCreateNode: () -> Void
     @Binding var pendingFocusNodeID: UUID?
+    let selectedNodeIDs: Set<UUID>
     @State private var pendingFocusCategoryID: UUID?
 
     var body: some View {
         List {
             Section {
-                NodeListView(pendingFocusNodeID: $pendingFocusNodeID)
+                NodeListView(
+                    pendingFocusNodeID: $pendingFocusNodeID,
+                    selectedNodeIDs: selectedNodeIDs
+                )
             } header: {
                 HStack {
                     Text("Nodes")

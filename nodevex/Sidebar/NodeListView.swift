@@ -5,6 +5,7 @@ struct NodeListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @Binding var pendingFocusNodeID: UUID?
+    let selectedNodeIDs: Set<UUID>
     @FocusState private var focusedRow: UUID?
 
     var body: some View {
@@ -17,6 +18,7 @@ struct NodeListView: View {
                 NodeRowView(
                     node: node,
                     focusedRow: $focusedRow,
+                    isSelected: selectedNodeIDs.contains(node.id),
                     onDelete: { NodeCommands.deleteNode(node, in: modelContext) }
                 )
             }
@@ -32,6 +34,7 @@ struct NodeListView: View {
 struct NodeRowView: View {
     @Bindable var node: Node
     @FocusState.Binding var focusedRow: UUID?
+    let isSelected: Bool
     let onDelete: () -> Void
 
     @State private var isHoveringTrash = false
@@ -50,5 +53,10 @@ struct NodeRowView: View {
             .onHover { isHoveringTrash = $0 }
             .help("Delete node")
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(isSelected ? SemanticColors.nodeFillSelected : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
     }
 }

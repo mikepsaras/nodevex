@@ -21,7 +21,8 @@ struct DocumentView: View {
         NavigationSplitView {
             SidebarView(
                 onCreateNode: createNewNode,
-                pendingFocusNodeID: $pendingFocusNodeID
+                pendingFocusNodeID: $pendingFocusNodeID,
+                selectedNodeIDs: selectedNodeIDs
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
