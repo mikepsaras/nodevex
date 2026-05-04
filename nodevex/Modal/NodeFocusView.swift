@@ -6,6 +6,7 @@ struct NodeFocusView: View {
     let onDismiss: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.terminology) private var terminology
     @Query private var allEdges: [Edge]
     @Query private var allNodes: [Node]
     @Query private var allCategories: [Category]
@@ -51,16 +52,16 @@ struct NodeFocusView: View {
                     header
                     categoriesSection
                     EdgeSection(
-                        title: "Causes",
-                        addLabel: "Add cause",
+                        title: terminology.inboundPlural,
+                        addLabel: "Add \(terminology.inboundSingular)",
                         edges: causes,
                         relatedNodeID: { $0.sourceID },
                         nodeName: nodeName(_:),
                         onAdd: { creationContext = EdgeCreationContext(direction: .cause) }
                     )
                     EdgeSection(
-                        title: "Effects",
-                        addLabel: "Add effect",
+                        title: terminology.outboundPlural,
+                        addLabel: "Add \(terminology.outboundSingular)",
                         edges: effects,
                         relatedNodeID: { $0.targetID },
                         nodeName: nodeName(_:),
@@ -179,6 +180,7 @@ struct NodeFocusView: View {
             )
         }
     }
+
 }
 
 struct EdgeCreationContext: Equatable {
@@ -296,13 +298,14 @@ private struct EdgeCreationView: View {
     let onCancel: () -> Void
     let onConfirm: (UUID, Double, EdgeValence) -> Void
 
+    @Environment(\.terminology) private var terminology
     @State private var pickedNodeID: UUID?
     @State private var strength: Double = 0.5
     @State private var valence: EdgeValence = .neutral
     @State private var searchText: String = ""
 
     private var directionLabel: String {
-        context.direction == .cause ? "cause" : "effect"
+        context.direction == .cause ? terminology.inboundSingular : terminology.outboundSingular
     }
 
     private var availableNodes: [Node] {
@@ -406,9 +409,9 @@ private struct EdgeCreationView: View {
                     .font(.caption)
                     .foregroundStyle(SemanticColors.textSecondary)
                 Picker("Valence", selection: $valence) {
-                    Text("Neutral").tag(EdgeValence.neutral)
-                    Text("Positive").tag(EdgeValence.positive)
-                    Text("Negative").tag(EdgeValence.negative)
+                    Text(terminology.valenceNeutral).tag(EdgeValence.neutral)
+                    Text(terminology.valencePositive).tag(EdgeValence.positive)
+                    Text(terminology.valenceNegative).tag(EdgeValence.negative)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

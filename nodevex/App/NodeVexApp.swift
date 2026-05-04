@@ -3,9 +3,12 @@ import SwiftData
 
 @main
 struct NodeVexApp: App {
+    @State private var terminologyStore = TerminologyStore()
+
     var body: some Scene {
         WindowGroup {
             DocumentView()
+                .environment(\.terminology, terminologyStore.terminology.resolved())
         }
         // Ephemeral (in-memory) storage during early development — every app
         // launch starts with an empty graph. Switch to DocumentGroup-based
@@ -17,5 +20,9 @@ struct NodeVexApp: App {
             inMemory: true,
             isUndoEnabled: true
         )
+
+        Settings {
+            SettingsView(store: terminologyStore)
+        }
     }
 }
