@@ -12,6 +12,7 @@ struct NodeFocusView: View {
     @Query private var allCategories: [Category]
 
     @State private var creationContext: EdgeCreationContext?
+    @State private var editingEdgeID: UUID?
 
     private var causes: [Edge] {
         allEdges.filter { $0.targetID == node.id }
@@ -57,7 +58,9 @@ struct NodeFocusView: View {
                         edges: causes,
                         relatedNodeID: { $0.sourceID },
                         nodeName: nodeName(_:),
-                        onAdd: { creationContext = EdgeCreationContext(direction: .cause) }
+                        onAdd: { creationContext = EdgeCreationContext(direction: .cause) },
+                        editingEdgeID: $editingEdgeID,
+                        onDelete: deleteEdge
                     )
                     EdgeSection(
                         title: terminology.outboundPlural,
@@ -65,7 +68,9 @@ struct NodeFocusView: View {
                         edges: effects,
                         relatedNodeID: { $0.targetID },
                         nodeName: nodeName(_:),
-                        onAdd: { creationContext = EdgeCreationContext(direction: .effect) }
+                        onAdd: { creationContext = EdgeCreationContext(direction: .effect) },
+                        editingEdgeID: $editingEdgeID,
+                        onDelete: deleteEdge
                     )
                 }
             }
@@ -181,6 +186,10 @@ struct NodeFocusView: View {
         }
     }
 
+    private func deleteEdge(_ edge: Edge) {
+        editingEdgeID = nil
+        EdgeCommands.deleteEdge(edge, in: modelContext)
+    }
 }
 
 struct EdgeCreationContext: Equatable {
@@ -221,6 +230,8 @@ private struct EdgeSection: View {
     let relatedNodeID: (Edge) -> UUID
     let nodeName: (UUID) -> String
     let onAdd: () -> Void
+    @Binding var editingEdgeID: UUID?
+    let onDelete: (Edge) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -238,7 +249,18 @@ private struct EdgeSection: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(edges) { edge in
-                        EdgeRow(edge: edge, name: nodeName(relatedNodeID(edge)))
+                        if editingEdgeID == edge.id {
+                            EdgeEditingRow(
+                                edge: edge,
+                                name: nodeName(relatedNodeID(edge)),
+                                onDone: { editingEdgeID = nil },
+                                onDelete: { onDelete(edge) }
+                            )
+                        } else {
+                            EdgeRow(edge: edge, name: nodeName(relatedNodeID(edge)))
+                                .contentShape(Rectangle())
+                                .onTapGesture { editingEdgeID = edge.id }
+                        }
                     }
                 }
             }
@@ -391,6 +413,27 @@ private struct EdgeCreationView: View {
                     .foregroundStyle(.tint)
             }
 
+            EdgeAttributesEditor(strength: $strength, valence: $valence)
+
+            HStack {
+                Spacer()
+                Button("Add \(directionLabel)") {
+                    onConfirm(picked.id, strength, valence)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+}
+
+private struct EdgeAttributesEditor: View {
+    @Binding var strength: Double
+    @Binding var valence: EdgeValence
+    @Environment(\.terminology) private var terminology
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Strength")
@@ -416,15 +459,6 @@ private struct EdgeCreationView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
-
-            HStack {
-                Spacer()
-                Button("Add \(directionLabel)") {
-                    onConfirm(picked.id, strength, valence)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
         }
     }
 
@@ -434,5 +468,40 @@ private struct EdgeCreationView: View {
         case ..<0.67: "medium"
         default: "strong"
         }
+    }
+}
+
+private struct EdgeEditingRow: View {
+    @Bindable var edge: Edge
+    let name: String
+    let onDone: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(name)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(SemanticColors.textPrimary)
+                Spacer()
+                Button("Done", action: onDone)
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+            }
+
+            EdgeAttributesEditor(strength: $edge.strength, valence: $edge.valence)
+
+            HStack {
+                Spacer()
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
     }
 }
