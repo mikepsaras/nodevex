@@ -22,7 +22,8 @@ struct DocumentView: View {
             SidebarView(
                 onCreateNode: createNewNode,
                 pendingFocusNodeID: $pendingFocusNodeID,
-                selectedNodeIDs: selectedNodeIDs
+                selectedNodeIDs: selectedNodeIDs,
+                onSelectNode: { selectedNodeIDs = [$0] }
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 400)
         } detail: {
@@ -77,6 +78,7 @@ struct DocumentView: View {
 
     private func createNewNode() {
         let node = NodeCommands.createNode(name: nextNodeName(), in: modelContext)
+        selectedNodeIDs = [node.id]
         DispatchQueue.main.async {
             pendingFocusNodeID = node.id
         }

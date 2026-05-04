@@ -6,6 +6,7 @@ struct NodeListView: View {
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @Binding var pendingFocusNodeID: UUID?
     let selectedNodeIDs: Set<UUID>
+    let onSelect: (UUID) -> Void
     @FocusState private var focusedRow: UUID?
 
     var body: some View {
@@ -19,6 +20,7 @@ struct NodeListView: View {
                     node: node,
                     focusedRow: $focusedRow,
                     isSelected: selectedNodeIDs.contains(node.id),
+                    onSelect: { onSelect(node.id) },
                     onDelete: { NodeCommands.deleteNode(node, in: modelContext) }
                 )
             }
@@ -35,6 +37,7 @@ struct NodeRowView: View {
     @Bindable var node: Node
     @FocusState.Binding var focusedRow: UUID?
     let isSelected: Bool
+    let onSelect: () -> Void
     let onDelete: () -> Void
 
     @State private var isHoveringTrash = false
@@ -58,5 +61,11 @@ struct NodeRowView: View {
         .background(isSelected ? SemanticColors.nodeFillSelected : .clear)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+        // simultaneousGesture fires alongside child controls (TextField focus,
+        // trash button) so any tap on the row also sets canvas selection. The
+        // alternative — a non-simultaneous gesture — would never fire because
+        // TextField captures the click for itself.
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { onSelect() })
     }
 }

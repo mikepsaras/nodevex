@@ -6,6 +6,7 @@ struct SidebarView: View {
     let onCreateNode: () -> Void
     @Binding var pendingFocusNodeID: UUID?
     let selectedNodeIDs: Set<UUID>
+    let onSelectNode: (UUID) -> Void
     @State private var pendingFocusCategoryID: UUID?
 
     var body: some View {
@@ -13,7 +14,8 @@ struct SidebarView: View {
             Section {
                 NodeListView(
                     pendingFocusNodeID: $pendingFocusNodeID,
-                    selectedNodeIDs: selectedNodeIDs
+                    selectedNodeIDs: selectedNodeIDs,
+                    onSelect: onSelectNode
                 )
             } header: {
                 HStack {
