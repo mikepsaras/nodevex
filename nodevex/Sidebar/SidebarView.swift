@@ -4,7 +4,7 @@ import SwiftData
 struct SidebarView: View {
     @Environment(\.modelContext) private var modelContext
     let onCreateNode: () -> Void
-    @Binding var pendingFocusNodeID: UUID?
+    @Binding var editingNodeID: UUID?
     let selectedNodeIDs: Set<UUID>
     let onSelectNode: (UUID) -> Void
     @State private var pendingFocusCategoryID: UUID?
@@ -13,7 +13,7 @@ struct SidebarView: View {
         List {
             Section {
                 NodeListView(
-                    pendingFocusNodeID: $pendingFocusNodeID,
+                    editingNodeID: $editingNodeID,
                     selectedNodeIDs: selectedNodeIDs,
                     onSelect: onSelectNode
                 )

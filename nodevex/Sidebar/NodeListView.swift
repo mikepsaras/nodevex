@@ -4,10 +4,9 @@ import SwiftData
 struct NodeListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
-    @Binding var pendingFocusNodeID: UUID?
+    @Binding var editingNodeID: UUID?
     let selectedNodeIDs: Set<UUID>
     let onSelect: (UUID) -> Void
-    @FocusState private var focusedRow: UUID?
 
     var body: some View {
         if nodes.isEmpty {
@@ -18,16 +17,12 @@ struct NodeListView: View {
             ForEach(nodes) { node in
                 NodeRowView(
                     node: node,
-                    focusedRow: $focusedRow,
                     isSelected: selectedNodeIDs.contains(node.id),
+                    isEditing: editingNodeID == node.id,
                     onSelect: { onSelect(node.id) },
+                    onCommitEdit: { editingNodeID = nil },
                     onDelete: { NodeCommands.deleteNode(node, in: modelContext) }
                 )
-            }
-            .onChange(of: pendingFocusNodeID) { _, newValue in
-                guard let newValue else { return }
-                focusedRow = newValue
-                pendingFocusNodeID = nil
             }
         }
     }
@@ -35,18 +30,33 @@ struct NodeListView: View {
 
 struct NodeRowView: View {
     @Bindable var node: Node
-    @FocusState.Binding var focusedRow: UUID?
     let isSelected: Bool
+    let isEditing: Bool
     let onSelect: () -> Void
+    let onCommitEdit: () -> Void
     let onDelete: () -> Void
 
     @State private var isHoveringTrash = false
+    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
         HStack {
-            TextField("Name", text: $node.name)
-                .focused($focusedRow, equals: node.id)
-                .textFieldStyle(.plain)
+            if isEditing {
+                TextField("Name", text: $node.name)
+                    .focused($isFieldFocused)
+                    .textFieldStyle(.plain)
+                    .onSubmit(onCommitEdit)
+                    .onAppear { isFieldFocused = true }
+                    .onChange(of: isFieldFocused) { _, focused in
+                        // Click-out commits the edit. Guard on isEditing so we
+                        // don't double-fire when the parent already cleared
+                        // editingNodeID (e.g., on Return).
+                        if !focused && isEditing { onCommitEdit() }
+                    }
+            } else {
+                Text(node.name)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
@@ -62,9 +72,7 @@ struct NodeRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         // simultaneousGesture fires alongside child controls (TextField focus,
-        // trash button) so any tap on the row also sets canvas selection. The
-        // alternative — a non-simultaneous gesture — would never fire because
-        // TextField captures the click for itself.
+        // trash button) so any tap on the row also sets canvas selection.
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { onSelect() })
     }
