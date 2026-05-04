@@ -1,6 +1,5 @@
 import Foundation
 import SwiftData
-import CoreGraphics
 
 enum NodeCommands {
     @discardableResult
@@ -26,17 +25,5 @@ enum NodeCommands {
             }
         }
         context.delete(node)
-    }
-
-    static func pinNode(_ node: Node, at position: CGPoint) {
-        node.isPinned = true
-        node.pinnedX = Double(position.x)
-        node.pinnedY = Double(position.y)
-    }
-
-    static func unpinNode(_ node: Node) {
-        node.isPinned = false
-        node.pinnedX = nil
-        node.pinnedY = nil
     }
 }

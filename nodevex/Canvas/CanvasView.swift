@@ -37,16 +37,6 @@ struct CanvasView: NSViewRepresentable {
         canvas.onNodeFocus = { [weak coordinator = context.coordinator] nodeID in
             coordinator?.parent.onNodeFocus(nodeID)
         }
-        canvas.onNodePin = { [weak coordinator = context.coordinator] nodeID, position in
-            guard let parent = coordinator?.parent,
-                  let node = parent.nodes.first(where: { $0.id == nodeID }) else { return }
-            NodeCommands.pinNode(node, at: position)
-        }
-        canvas.onNodeUnpin = { [weak coordinator = context.coordinator] nodeID in
-            guard let parent = coordinator?.parent,
-                  let node = parent.nodes.first(where: { $0.id == nodeID }) else { return }
-            NodeCommands.unpinNode(node)
-        }
         scrollView.documentView = canvas
 
         return scrollView

@@ -236,10 +236,6 @@ struct CGCanvasRenderer: CanvasRenderer {
         context.setLineWidth(nodeBorderWidth)
         context.strokeEllipse(in: circleRect)
 
-        if node.isPinned {
-            drawPinGlyph(at: point, nodeRadius: radius, in: context)
-        }
-
         // Hover: shift the label down by 2pt as a quiet responsiveness cue.
         let labelExtraGap: CGFloat = isHighlighted ? 2 : 0
         drawLabel(
@@ -249,35 +245,6 @@ struct CGCanvasRenderer: CanvasRenderer {
             isSelected: isSelected,
             extraGap: labelExtraGap
         )
-    }
-
-    /// A barely-there pin marker at the upper-right of the node circle: a small
-    /// filled head plus a short stub tail. Manually drawn rather than rendering
-    /// SF Symbol `pin.fill` because tinting symbols inside a flipped CGContext
-    /// is fiddly and the visual goal is "just enough to know it's pinned".
-    private func drawPinGlyph(at nodeCenter: CGPoint, nodeRadius: CGFloat, in context: CGContext) {
-        let offsetX = nodeRadius * 0.75
-        let offsetY = nodeRadius * 0.95
-        let cx = nodeCenter.x + offsetX
-        let cy = nodeCenter.y - offsetY
-
-        let color = NSColor.secondaryLabelColor.withAlphaComponent(0.7)
-        context.setFillColor(color.cgColor)
-        context.setStrokeColor(color.cgColor)
-
-        let headRadius: CGFloat = 1.6
-        context.fillEllipse(in: CGRect(
-            x: cx - headRadius,
-            y: cy - headRadius,
-            width: headRadius * 2,
-            height: headRadius * 2
-        ))
-
-        context.setLineWidth(1.0)
-        context.setLineCap(.round)
-        context.move(to: CGPoint(x: cx, y: cy + headRadius - 0.3))
-        context.addLine(to: CGPoint(x: cx, y: cy + headRadius + 2.0))
-        context.strokePath()
     }
 
     private func nodeFillColor(for node: Node, isSelected: Bool, isHighlighted: Bool) -> NSColor {

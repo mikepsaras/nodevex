@@ -31,20 +31,9 @@ final class CanvasNSView: NSView {
 
     var onSelectionChange: ((Set<UUID>) -> Void)?
     var onNodeFocus: ((UUID) -> Void)?
-    var onNodePin: ((UUID, CGPoint) -> Void)?
-    var onNodeUnpin: ((UUID) -> Void)?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
-
-    private struct DragState {
-        let nodeID: UUID
-        let downPoint: CGPoint
-        let originalPosition: CGPoint
-        var didCrossThreshold: Bool
-    }
-    private var dragState: DragState?
-    private let dragThreshold: CGFloat = 3
 
     /// Per ADR-0011: hovering a node reveals its connections after a delay,
     /// fades in/out, and the node itself gets an immediate highlight cue.
@@ -61,6 +50,11 @@ final class CanvasNSView: NSView {
     private var lastModalFocusedNodeID: UUID?
     private var lastLayoutMode: LayoutMode?
 
+    /// Node hit on mouseDown, consumed on mouseUp to decide whether to open
+    /// the focus modal. Drag will get its own state when it's rebuilt around
+    /// continuous physics in a follow-up commit.
+    private var pendingClickNodeID: UUID?
+
     deinit {
         animationTimer?.invalidate()
         hoverDelayTimer?.invalidate()
@@ -76,14 +70,14 @@ final class CanvasNSView: NSView {
     ) {
         let layoutModeChanged = lastLayoutMode != layoutMode
         if layoutModeChanged {
-            layoutEngine.currentStrategy = layoutMode.strategy
+            layoutEngine.currentMode = layoutMode  // didSet reapplies graph
             lastLayoutMode = layoutMode
         }
 
         let signature = graphSignature(graph)
         if signature != lastGraphSignature || layoutModeChanged {
             self.graph = graph
-            layoutEngine.relayout(graph: graph)
+            layoutEngine.applyGraphChange(graph)
             self.positions = layoutEngine.positions
             lastGraphSignature = signature
         } else {
@@ -185,10 +179,10 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Animation drives both arrow flow on visible edges and any in-flight
-        // hover-reveal fade. Run while edges are animated globally OR a reveal
-        // is active (transitioning or steady).
-        if edgeVisibility == .animated || reveal != nil {
+        // Timer drives three things: arrow flow on animated edges, hover-reveal
+        // fade transitions, and the continuous force-physics tick. Run while
+        // any of them is active.
+        if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -207,6 +201,17 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
+            // One physics step per frame. Pulls dragged nodes via overrides,
+            // applies forces to the rest, decays alpha. When alpha settles
+            // and other animation reasons go quiet, the timer self-stops.
+            self.layoutEngine.tick()
+            self.positions = self.layoutEngine.positions
+            // If physics finished settling but other animations are still
+            // active, we keep ticking; if everything's quiet, recompute the
+            // timer state.
+            if !self.layoutEngine.isActive && self.edgeVisibility != .animated && self.reveal == nil {
+                self.stopAnimationTimer()
+            }
             self.needsDisplay = true
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -263,27 +268,10 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
-        // Option-click on a pinned node unpins it and leaves selection alone.
-        if modifiers.contains(.option),
-           let hitID,
-           let node = graph.nodes.first(where: { $0.id == hitID }),
-           node.isPinned {
-            onNodeUnpin?(hitID)
-            return
-        }
-
-        // Set up potential drag-to-pin. The mouseUp handler decides whether
-        // this turned into a drag (→ pin commit) or stayed a click (→ modal).
-        if let hitID, let pos = positions[hitID] {
-            dragState = DragState(
-                nodeID: hitID,
-                downPoint: canvasPoint,
-                originalPosition: pos,
-                didCrossThreshold: false
-            )
-        } else {
-            dragState = nil
-        }
+        // Remember the hit node so mouseUp can route a plain click to the
+        // focus modal. Drag interaction is handled separately when it's
+        // rebuilt around continuous physics.
+        pendingClickNodeID = hitID
 
         // Plain click no longer selects — it opens the focus modal on mouseUp.
         // Selection requires shift (add) or command (toggle). Click on empty
@@ -309,58 +297,16 @@ final class CanvasNSView: NSView {
         onSelectionChange?(newSelection)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard var state = dragState else { return }
-        let pointInView = convert(event.locationInWindow, from: nil)
-        let canvasPoint = CGPoint(
-            x: pointInView.x - bounds.midX,
-            y: pointInView.y - bounds.midY
-        )
-
-        let dx = canvasPoint.x - state.downPoint.x
-        let dy = canvasPoint.y - state.downPoint.y
-        if !state.didCrossThreshold && (dx * dx + dy * dy) > dragThreshold * dragThreshold {
-            state.didCrossThreshold = true
-        }
-
-        if state.didCrossThreshold {
-            positions[state.nodeID] = CGPoint(
-                x: state.originalPosition.x + dx,
-                y: state.originalPosition.y + dy
-            )
-            needsDisplay = true
-        }
-
-        dragState = state
-    }
-
     override func mouseUp(with event: NSEvent) {
-        defer { dragState = nil }
-        guard let state = dragState else { return }
-
-        if state.didCrossThreshold {
-            // Drag committed — pin the node at its final position.
-            if let pos = positions[state.nodeID] {
-                onNodePin?(state.nodeID, pos)
-            }
-            return
-        }
-
-        // Plain click without drag — open the focus modal. Modifier-clicks
-        // already routed to selection in mouseDown and shouldn't also open
-        // the modal.
+        defer { pendingClickNodeID = nil }
+        guard let nodeID = pendingClickNodeID else { return }
         let modifiers = event.modifierFlags
         if modifiers.isDisjoint(with: [.shift, .command, .option]) {
-            onNodeFocus?(state.nodeID)
+            onNodeFocus?(nodeID)
         }
     }
 
     override func mouseMoved(with event: NSEvent) {
-        // Don't reveal during a drag — the user is busy with another gesture.
-        if dragState != nil {
-            updateHover(target: nil)
-            return
-        }
         let pointInView = convert(event.locationInWindow, from: nil)
         let canvasPoint = CGPoint(
             x: pointInView.x - bounds.midX,
@@ -485,17 +431,11 @@ final class CanvasNSView: NSView {
         let edgeFingerprints: Set<String> = Set(graph.edges.map { edge in
             "\(edge.id):\(edge.sourceID):\(edge.targetID)"
         })
-        // Pin *bool* — not coords. We want unpin to trigger a relayout (so the
-        // node reflows), but dragging an already-pinned node should not (we
-        // update positions directly during drag and don't want a force-iteration
-        // pass to fight that).
-        let pinnedIDs: Set<UUID> = Set(graph.nodes.filter { $0.isPinned }.map { $0.id })
 
         var hasher = Hasher()
         hasher.combine(nodeIDs)
         hasher.combine(categoryMemberships)
         hasher.combine(edgeFingerprints)
-        hasher.combine(pinnedIDs)
         return hasher.finalize()
     }
 }

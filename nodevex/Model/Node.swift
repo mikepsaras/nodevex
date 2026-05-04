@@ -6,9 +6,6 @@ final class Node {
     var id: UUID
     var name: String
     var createdAt: Date
-    var isPinned: Bool
-    var pinnedX: Double?
-    var pinnedY: Double?
 
     @Relationship(deleteRule: .nullify, inverse: \Category.nodes)
     var categories: [Category]
@@ -17,9 +14,6 @@ final class Node {
         self.id = UUID()
         self.name = name
         self.createdAt = Date()
-        self.isPinned = false
-        self.pinnedX = nil
-        self.pinnedY = nil
         self.categories = []
     }
 }

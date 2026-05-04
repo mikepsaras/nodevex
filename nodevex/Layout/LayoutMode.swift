@@ -1,8 +1,8 @@
 import Foundation
 
-/// User-selectable layout, plumbed from the canvas footer through CanvasView
-/// down to CanvasNSView's LayoutEngine. Each case maps to a `LayoutStrategy`
-/// implementation.
+/// User-selectable layout. Force-directed runs continuously (tick-based,
+/// alpha-decayed). Hierarchical is a one-shot batch. `LayoutEngine` selects
+/// behavior off this enum directly — no shared protocol bridge.
 enum LayoutMode: String, CaseIterable, Identifiable {
     case forceDirected
     case hierarchical
@@ -13,13 +13,6 @@ enum LayoutMode: String, CaseIterable, Identifiable {
         switch self {
         case .forceDirected: "Force-directed"
         case .hierarchical: "Hierarchical"
-        }
-    }
-
-    var strategy: any LayoutStrategy {
-        switch self {
-        case .forceDirected: ForceDirectedLayout()
-        case .hierarchical: HierarchicalLayout()
         }
     }
 }
