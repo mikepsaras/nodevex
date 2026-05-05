@@ -19,25 +19,27 @@ import CoreGraphics
 /// shifted from the midpoint by (w_i − w_j) / (2·‖j − i‖) toward j. Larger
 /// w_i shifts the bisector away from i, growing i's cell.
 ///
-/// Seed positions follow a hub-and-spoke layout:
-/// - **First (earliest-created) single-category** seed sits at the canvas
-///   center — the hub.
-/// - **Remaining single-category** seeds fill the spokes — evenly
-///   distributed by angle on a ring around the hub at
-///   `innerRingFraction × min(bounds.width, bounds.height)`. Sort order is
-///   `createdAt` ascending with UUID tiebreaker, so adding a new category
-///   appends to the ring without reshuffling existing positions.
+/// Seed positions follow a fixed-slot layout — always at least the
+/// "6 around 1" honeycomb visible, even before the user creates any
+/// categories:
+///
+/// - **Center** seed is `.uncategorized` — that's where new nodes spawn
+///   before they're assigned a category.
+/// - **Inner ring** has 6 slots evenly distributed by angle on a ring at
+///   `innerRingFraction × min(bounds.width, bounds.height)`. Categories
+///   fill these slots in `createdAt` order. Slots without a category yet
+///   get phantom seeds with `.empty(slotIndex:)` keys so the cell stays
+///   visible as a placeholder.
+/// - **Outer rings** activate when more than 6 categories exist. Ring N
+///   (N ≥ 2) has 6N slots at radius `N × innerRingRadius`. No phantoms
+///   in outer rings — slots only appear when categories fill them.
 /// - **Combination** seeds sit at the centroid of their constituent
 ///   single-category seeds — a node in {A, B} ends up in the cell wedged
 ///   between A's and B's cells (the "Venn middle").
-/// - **Uncategorized** seed sits near the top-right corner of bounds, so
-///   its cell is the peripheral wedge. Categorized cells take visual
-///   priority from the center outward.
 ///
-/// For 7 categories this gives the classic "1 in the middle, 6 around it"
-/// honeycomb. For other counts it degrades gracefully — 2 categories
-/// place the second across from the center, 8 spread on the ring at ~51°
-/// each, etc.
+/// Sort order for category → slot assignment is `createdAt` ascending
+/// with UUID tiebreaker, so adding a new category appends to the next
+/// open slot without reshuffling existing positions.
 struct VoronoiPartitioner: RegionPartitioner {
     /// Inner-ring radius for single-category seeds, as a fraction of
     /// `min(bounds.width, bounds.height)`.
@@ -104,92 +106,150 @@ struct VoronoiPartitioner: RegionPartitioner {
         bounds: CGRect
     ) -> [Seed] {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let innerRadius = min(bounds.width, bounds.height) * innerRingFraction
+        let baseRadius = min(bounds.width, bounds.height) * innerRingFraction
 
-        // Hub-and-spoke seeding. The earliest-created category goes at the
-        // canvas center; each subsequent category fills a slot on the ring
-        // around it, evenly distributed by angle. This gives the
-        // "1-in-the-middle, 6-around" honeycomb feel for typical 7-category
-        // graphs and degrades gracefully for any other count: 2 categories
-        // place the second across from the center, 8 spread on the ring at
-        // ~51° each, and so on.
-        //
-        // Sort by `createdAt` (oldest first) with UUID tiebreaker so the
-        // ordering is deterministic AND user-meaningful — the first
-        // category the user creates gets the center, and adding a new
-        // category appends to the outer ring instead of reshuffling.
-        var categoryByID: [UUID: Category] = [:]
-        for cat in categories { categoryByID[cat.id] = cat }
-        let singleCategoryIDs: [UUID] = keyCounts.keys.compactMap { key in
-            if case .single(let id) = key { return id }
-            return nil
-        }.sorted { lhs, rhs in
-            let lhsTime = categoryByID[lhs]?.createdAt ?? .distantPast
-            let rhsTime = categoryByID[rhs]?.createdAt ?? .distantPast
-            if lhsTime != rhsTime { return lhsTime < rhsTime }
-            return lhs.uuidString < rhs.uuidString
-        }
-
-        var anchorByCategory: [UUID: CGPoint] = [:]
-        if singleCategoryIDs.count == 1 {
-            // Solo category — at the canvas center.
-            anchorByCategory[singleCategoryIDs[0]] = center
-        } else if singleCategoryIDs.count > 1 {
-            // First (oldest) → center. Remaining → evenly distributed ring.
-            anchorByCategory[singleCategoryIDs[0]] = center
-            let outerCount = singleCategoryIDs.count - 1
-            let slotStep = (2 * .pi) / CGFloat(outerCount)
-            for (offset, id) in singleCategoryIDs.dropFirst().enumerated() {
-                let angle = CGFloat(offset) * slotStep
-                anchorByCategory[id] = CGPoint(
-                    x: center.x + cos(angle) * innerRadius,
-                    y: center.y + sin(angle) * innerRadius
-                )
+        // Sort categories by createdAt (oldest first) with UUID tiebreaker
+        // so adding a new category appends to the next open outer slot
+        // without reshuffling earlier ones.
+        let sortedCategoryIDs: [UUID] = categories
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt {
+                    return lhs.createdAt < rhs.createdAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
             }
+            .map { $0.id }
+
+        // Inner ring has 6 fixed slots; outer rings activate as needed.
+        // Slots 0–5 are inner ring; slots 6–17 are middle ring (12 slots
+        // at 2× radius); slots 18–35 are outer-outer ring (18 slots at
+        // 3× radius); etc. (each ring N has 6N slots at radius N × base).
+        var anchorByCategory: [UUID: CGPoint] = [:]
+        for (slotIdx, id) in sortedCategoryIDs.enumerated() {
+            anchorByCategory[id] = outerSlotPosition(
+                slotIndex: slotIdx,
+                center: center,
+                baseRadius: baseRadius
+            )
         }
 
-        // Weight scale: per-node weight equals (bounds area / total nodes /
-        // divisor). Divisor dampens dramatic cell-size differences.
+        // Phantom seeds fill empty slots in the inner ring (only) — that
+        // way the canvas always shows the "6 around 1" config from the
+        // start, and slots fill in as the user creates categories. Outer
+        // rings are sparse: only filled slots get seeds. Guard the lower
+        // bound — when category count exceeds the inner ring, the range
+        // `count..<innerRingSize` would be invalid and trap.
+        var phantomSlots: [(slotIndex: Int, position: CGPoint)] = []
+        let innerRingSize = 6
+        let firstEmptySlot = min(sortedCategoryIDs.count, innerRingSize)
+        for slotIdx in firstEmptySlot..<innerRingSize {
+            phantomSlots.append((
+                slotIndex: slotIdx,
+                position: outerSlotPosition(
+                    slotIndex: slotIdx,
+                    center: center,
+                    baseRadius: baseRadius
+                )
+            ))
+        }
+
+        // Weight scale: per-node weight equals (bounds area / total nodes
+        // / divisor). Empty cells (no nodes — phantom slots, brand-new
+        // categories without nodes) get a baseline weight equivalent to
+        // 1 node so they aren't squeezed out of the tessellation.
         let totalNodes = max(keyCounts.values.reduce(0, +), 1)
         let weightScale = bounds.width * bounds.height
             / CGFloat(totalNodes)
             / weightScaleDivisor
 
+        @inline(__always) func weightFor(_ count: Int) -> CGFloat {
+            CGFloat(max(1, count)) * weightScale
+        }
+
         var seeds: [Seed] = []
-        seeds.reserveCapacity(keyCounts.count)
+
+        // Center: the uncategorized cell. Always present — that's where
+        // new nodes spawn even before any categories exist.
+        let uncategorizedCount = keyCounts[.uncategorized] ?? 0
+        seeds.append(Seed(
+            key: .uncategorized,
+            position: center,
+            weight: weightFor(uncategorizedCount)
+        ))
+
+        // Phantom inner-ring seeds — placeholder cells with no associated
+        // category yet. They render in the renderer's neutral color.
+        for phantom in phantomSlots {
+            seeds.append(Seed(
+                key: .empty(slotIndex: phantom.slotIndex),
+                position: phantom.position,
+                weight: weightFor(0)
+            ))
+        }
+
+        // Single-category seeds for every category present in the graph
+        // (whether or not it has any nodes — empty categories still get
+        // a slot so their cell shows up immediately on creation).
+        for id in sortedCategoryIDs {
+            guard let position = anchorByCategory[id] else { continue }
+            let count = keyCounts[.single(id)] ?? 0
+            seeds.append(Seed(
+                key: .single(id),
+                position: position,
+                weight: weightFor(count)
+            ))
+        }
+
+        // Combination seeds — at the centroid of constituent single-
+        // category anchors. Multi-category nodes settle in the "Venn
+        // middle" between their groups.
         for (key, count) in keyCounts {
-            let position: CGPoint
-            switch key {
-            case .single(let id):
-                position = anchorByCategory[id] ?? center
-            case .combination(let ids):
-                // Centroid of constituent single-category anchors. Multi-
-                // category nodes settle in the "Venn middle" between groups.
-                var sumX: CGFloat = 0, sumY: CGFloat = 0, num = 0
-                for id in ids {
-                    if let anchor = anchorByCategory[id] {
-                        sumX += anchor.x
-                        sumY += anchor.y
-                        num += 1
-                    }
+            guard case .combination(let ids) = key else { continue }
+            var sumX: CGFloat = 0, sumY: CGFloat = 0, num = 0
+            for id in ids {
+                if let anchor = anchorByCategory[id] {
+                    sumX += anchor.x
+                    sumY += anchor.y
+                    num += 1
                 }
-                position = num > 0
-                    ? CGPoint(x: sumX / CGFloat(num), y: sumY / CGFloat(num))
-                    : center
-            case .uncategorized:
-                // Peripheral wedge near the top-right corner of bounds.
-                position = CGPoint(
-                    x: bounds.maxX - bounds.width * 0.05,
-                    y: bounds.maxY - bounds.height * 0.05
-                )
             }
+            let position = num > 0
+                ? CGPoint(x: sumX / CGFloat(num), y: sumY / CGFloat(num))
+                : center
             seeds.append(Seed(
                 key: key,
                 position: position,
-                weight: CGFloat(count) * weightScale
+                weight: weightFor(count)
             ))
         }
+
         return seeds
+    }
+
+    /// Slot position on the concentric-rings layout. Slot 0–5 = inner
+    /// ring at radius `baseRadius`; slots 6–17 = middle ring at `2 ×
+    /// baseRadius` (12 slots); slots 18–35 = outer-outer ring at `3 ×
+    /// baseRadius` (18 slots); ring N has 6N slots. Within each ring,
+    /// slots are evenly distributed by angle.
+    private func outerSlotPosition(
+        slotIndex: Int,
+        center: CGPoint,
+        baseRadius: CGFloat
+    ) -> CGPoint {
+        var ring = 1
+        var firstInRing = 0
+        while slotIndex >= firstInRing + 6 * ring {
+            firstInRing += 6 * ring
+            ring += 1
+        }
+        let slotInRing = slotIndex - firstInRing
+        let slotsInRing = 6 * ring
+        let angle = CGFloat(slotInRing) * (2 * .pi) / CGFloat(slotsInRing)
+        let radius = baseRadius * CGFloat(ring)
+        return CGPoint(
+            x: center.x + cos(angle) * radius,
+            y: center.y + sin(angle) * radius
+        )
     }
 
     private func polygon(for rect: CGRect) -> [CGPoint] {

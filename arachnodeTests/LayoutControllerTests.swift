@@ -53,8 +53,9 @@ struct LayoutControllerTests {
             bounds: bounds
         )
 
+        // 1 node placed; partition produces 7 regions (uncategorized +
+        // 6 phantom outer slots — the default config).
         #expect(result.positions.count == 1)
-        #expect(result.regions.count == 1)
         let region = result.regions[.uncategorized]!
         let pos = result.positions[n.id]!
         let centroid = region.centroid

@@ -314,10 +314,11 @@ final class CGCanvasRenderer: CanvasRenderer {
 
     /// Resolve a `CategoryKey` to a tint color. Single-category cells use
     /// the category's display color; combinations average their constituents
-    /// in sRGB; uncategorized falls back to a neutral gray.
+    /// in sRGB; uncategorized and `.empty` placeholder cells fall back to
+    /// a neutral gray.
     private func regionColor(for key: CategoryKey, graph: GraphSnapshot) -> NSColor {
         switch key {
-        case .uncategorized:
+        case .uncategorized, .empty:
             return .secondaryLabelColor
         case .single(let id):
             return graph.categories.first(where: { $0.id == id })?.nsDisplayColor

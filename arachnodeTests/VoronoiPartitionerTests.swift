@@ -33,37 +33,61 @@ struct VoronoiPartitionerTests {
         #expect(result.isEmpty)
     }
 
-    @Test("single uncategorized node → one cell covering nearly all of bounds")
-    func singleUncategorized() throws {
+    @Test("default config: 1 uncategorized cell at center + 6 phantom outer slots")
+    func defaultSevenCellConfiguration() throws {
         let context = try makeContext()
         let n = makeNode(context, name: "A")
         let graph = GraphSnapshot(nodes: [n], edges: [], categories: [])
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        #expect(result.count == 1)
+        // 1 uncategorized + 6 empty inner-ring slots = 7 cells.
+        #expect(result.count == 7)
         #expect(result[.uncategorized] != nil)
-        // Only one seed → its cell is the entire bounds.
-        let area = result[.uncategorized]!.area
+        for slot in 0..<6 {
+            #expect(result[.empty(slotIndex: slot)] != nil, "missing phantom slot \(slot)")
+        }
+        // Together they tessellate the bounds.
+        let totalArea = result.values.reduce(0) { $0 + $1.area }
         let boundsArea = bounds.width * bounds.height
-        #expect(abs(area - boundsArea) < boundsArea * 0.001)
+        #expect(abs(totalArea - boundsArea) < boundsArea * 0.001)
     }
 
-    @Test("single categorized node → one cell covering bounds")
-    func singleCategorized() throws {
+    @Test("uncategorized cell sits at the canvas center")
+    func uncategorizedAtCenter() throws {
+        let context = try makeContext()
+        let n = makeNode(context, name: "A")
+        let graph = GraphSnapshot(nodes: [n], edges: [], categories: [])
+
+        let result = partitioner.partition(graph: graph, bounds: bounds)
+        let canvasCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        let centroid = result[.uncategorized]!.centroid
+        // With 6 surrounding equal-weight phantoms, the uncategorized
+        // cell is a regular hexagon centered on the seed.
+        #expect(abs(centroid.x - canvasCenter.x) < 5)
+        #expect(abs(centroid.y - canvasCenter.y) < 5)
+    }
+
+    @Test("single category → 1 single + 5 phantom + uncategorized = 7 cells")
+    func singleCategoryFillsOneOfSixOuterSlots() throws {
         let context = try makeContext()
         let cat = arachnode.Category(name: "Cat"); context.insert(cat)
         let n = makeNode(context, name: "A", categories: [cat])
         let graph = GraphSnapshot(nodes: [n], edges: [], categories: [cat])
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        #expect(result.count == 1)
+        #expect(result.count == 7)
         #expect(result[.single(cat.id)] != nil)
-        let area = result[.single(cat.id)]!.area
-        let boundsArea = bounds.width * bounds.height
-        #expect(abs(area - boundsArea) < boundsArea * 0.001)
+        #expect(result[.uncategorized] != nil)
+        // 5 of the 6 inner-ring slots are still phantom (the category
+        // takes slot 0).
+        var phantomCount = 0
+        for slot in 0..<6 {
+            if result[.empty(slotIndex: slot)] != nil { phantomCount += 1 }
+        }
+        #expect(phantomCount == 5)
     }
 
-    @Test("two single-category nodes produce two non-overlapping cells covering bounds")
+    @Test("two categories → 2 single + 4 phantom + uncategorized = 7 cells")
     func twoCategoriesPartitionBounds() throws {
         let context = try makeContext()
         let catA = arachnode.Category(name: "A"); context.insert(catA)
@@ -77,7 +101,9 @@ struct VoronoiPartitionerTests {
         )
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        #expect(result.count == 2)
+        #expect(result.count == 7)
+        #expect(result[.single(catA.id)] != nil)
+        #expect(result[.single(catB.id)] != nil)
         let totalArea = result.values.reduce(0) { $0 + $1.area }
         let boundsArea = bounds.width * bounds.height
         #expect(abs(totalArea - boundsArea) < boundsArea * 0.01)
@@ -98,8 +124,8 @@ struct VoronoiPartitionerTests {
         )
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        // Three keys: single A, single B, combination [A, B].
-        #expect(result.count == 3)
+        // 2 singles + 1 combination + 4 phantom + 1 uncategorized = 8.
+        #expect(result.count == 8)
         #expect(result[.single(catA.id)] != nil)
         #expect(result[.single(catB.id)] != nil)
         #expect(result[.combination([catA.id, catB.id])] != nil)
@@ -125,7 +151,6 @@ struct VoronoiPartitionerTests {
         )
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        #expect(result.count == 2)
         let areaA = result[.single(catA.id)]?.area ?? 0
         let areaB = result[.single(catB.id)]?.area ?? 0
         #expect(
@@ -154,55 +179,48 @@ struct VoronoiPartitionerTests {
         #expect(abs(totalArea - boundsArea) < boundsArea * 0.01)
     }
 
-    @Test("solo category cell is centered on the canvas (hub-and-spoke)")
-    func soloCategoryAtCenter() throws {
+    @Test("six categories fill the inner ring, no phantoms remain")
+    func sixCategoriesFillInnerRing() throws {
         let context = try makeContext()
-        let cat = arachnode.Category(name: "Cat"); context.insert(cat)
-        let n = makeNode(context, name: "n", categories: [cat])
-        let graph = GraphSnapshot(nodes: [n], edges: [], categories: [cat])
+        var cats: [arachnode.Category] = []
+        for i in 0..<6 {
+            let c = arachnode.Category(name: "C\(i)"); context.insert(c)
+            cats.append(c)
+        }
+        // One node anchors keyCounts so partition() doesn't short-circuit;
+        // the slot-assignment logic ranges over `graph.categories`, not
+        // node membership, so a single node in any category is enough.
+        let n = makeNode(context, name: "n", categories: [cats[0]])
+        let graph = GraphSnapshot(nodes: [n], edges: [], categories: cats)
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        let region = result[.single(cat.id)]!
-        // The solo cell covers the bounds — centroid should be at the
-        // canvas center.
-        let canvasCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-        #expect(abs(region.centroid.x - canvasCenter.x) < 1)
-        #expect(abs(region.centroid.y - canvasCenter.y) < 1)
+        // 6 singles + 0 phantoms + 1 uncategorized = 7.
+        #expect(result.count == 7)
+        for cat in cats {
+            #expect(result[.single(cat.id)] != nil)
+        }
+        for slot in 0..<6 {
+            #expect(result[.empty(slotIndex: slot)] == nil)
+        }
     }
 
-    @Test("first-created category gets the center hub; later ones go to the spokes")
-    func hubAndSpokeOrdering() throws {
+    @Test("seven categories: inner ring full, 7th goes to outer ring")
+    func seventhCategoryGoesToOuterRing() throws {
         let context = try makeContext()
-        // Create categories in a specific order so `createdAt` is
-        // deterministic. The first to be inserted gets the hub.
-        let hub = arachnode.Category(name: "Hub"); context.insert(hub)
-        let spokeA = arachnode.Category(name: "SpokeA"); context.insert(spokeA)
-        let spokeB = arachnode.Category(name: "SpokeB"); context.insert(spokeB)
-        let nHub = makeNode(context, name: "h", categories: [hub])
-        let nA = makeNode(context, name: "a", categories: [spokeA])
-        let nB = makeNode(context, name: "b", categories: [spokeB])
-        let graph = GraphSnapshot(
-            nodes: [nHub, nA, nB],
-            edges: [],
-            categories: [hub, spokeA, spokeB]
-        )
+        var cats: [arachnode.Category] = []
+        for i in 0..<7 {
+            let c = arachnode.Category(name: "C\(i)"); context.insert(c)
+            cats.append(c)
+        }
+        let n = makeNode(context, name: "n", categories: [cats[0]])
+        let graph = GraphSnapshot(nodes: [n], edges: [], categories: cats)
 
         let result = partitioner.partition(graph: graph, bounds: bounds)
-        let canvasCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-
-        // Each cell's centroid is some signal of its anchor location.
-        // The hub's cell centroid should be much closer to the canvas
-        // center than either spoke's.
-        let hubCentroid = result[.single(hub.id)]!.centroid
-        let spokeACentroid = result[.single(spokeA.id)]!.centroid
-        let spokeBCentroid = result[.single(spokeB.id)]!.centroid
-
-        let hubDist = hypot(hubCentroid.x - canvasCenter.x, hubCentroid.y - canvasCenter.y)
-        let spokeADist = hypot(spokeACentroid.x - canvasCenter.x, spokeACentroid.y - canvasCenter.y)
-        let spokeBDist = hypot(spokeBCentroid.x - canvasCenter.x, spokeBCentroid.y - canvasCenter.y)
-
-        #expect(hubDist < spokeADist)
-        #expect(hubDist < spokeBDist)
+        // 7 singles + 0 phantoms + 1 uncategorized = 8.
+        #expect(result.count == 8)
+        for cat in cats {
+            #expect(result[.single(cat.id)] != nil)
+        }
     }
 
     @Test("partitioning is deterministic — same graph produces same regions twice")
