@@ -21,13 +21,17 @@ struct ForceDirectedLayout {
     /// Barnes–Hut accuracy parameter. 0 = exact (full O(n²) sum), higher =
     /// faster but coarser. d3-force defaults to 0.9; we match it.
     private let barnesHutTheta: CGFloat = 0.9
-    /// Linear pull between same-category nodes. Old batch used 0.08, which
-    /// was effectively much stronger in 60-iteration batch mode under cooling
-    /// temperature. In continuous mode, it has to compete with the
-    /// inverse-square repulsion of every other node *between* a categorized
-    /// pair — the clustering equilibrium distance is ~`(repulsion / strength)
-    /// ^ (1/3)`, so 0.5 puts it around 150pt vs 0.08's ~280pt.
-    private let categoryClusterStrength: CGFloat = 0.5
+    /// Per-tick pull from each owned category's centroid. Replaces the prior
+    /// O(n²) pairwise Hooke clustering with two O(n) passes (accumulate
+    /// centroids, then apply pulls). Same Democracy-4-style "ministry zone"
+    /// effect as the pairwise version, plus calmer behavior on overlapping
+    /// memberships (no pair-feedback loops). Multi-category nodes feel one
+    /// pull per owned centroid, so the resultant lands at the average — that's
+    /// what positions shared nodes between groups. Tuned to land near the
+    /// prior ~150-200pt cluster diameter; raise for tighter zones, lower for
+    /// looser. The `maxForcePerTick` clamp dominates at long range, so this
+    /// mainly shapes the close-equilibrium regime.
+    private let categoryAnchorStrength: CGFloat = 1.5
     private let velocityDecay: CGFloat = 0.4
     private let maxForcePerTick: CGFloat = 4
 
@@ -37,12 +41,14 @@ struct ForceDirectedLayout {
     /// engine skips this method entirely while a drag is active).
     ///
     /// Implementation note: positions/velocities/displacements are hoisted
-    /// into ordinal-indexed arrays for the duration of the tick. The inner
-    /// repulsion + clustering loops are O(n²) — at 200 nodes that's ~40 000
-    /// pair iterations per tick, and a single `[UUID: CGPoint]` dictionary
-    /// lookup costs ~50 ns. Working in arrays drops the per-pair access
-    /// from ~100 ns of hashing to a couple of ns of indexed load, which is
-    /// the difference between butter-smooth and stutter at this scale.
+    /// into ordinal-indexed arrays for the duration of the tick. Repulsion
+    /// is O(n log n) via Barnes–Hut and category anchoring is O(n) via
+    /// centroid accumulation, so the per-tick budget is dominated by the
+    /// integration sweep — but the hot Barnes–Hut walk still does on the
+    /// order of `n × log n` position reads per tick. A `[UUID: CGPoint]`
+    /// lookup costs ~50 ns; an indexed array load is a couple of ns. At
+    /// 500-node stress-test scale that's the difference between butter-
+    /// smooth and stutter, so the array hoisting stays.
     func advance(
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
@@ -121,28 +127,40 @@ struct ForceDirectedLayout {
             disp[v].y += unitY * force
         }
 
-        // Category clustering — gentle Hooke pull between nodes that share at
-        // least one category, per ADR-0019 / ADR-0023.
-        let nodeCategoryIDs: [Set<UUID>] = graph.nodes.map { Set($0.categories.map { $0.id }) }
+        // Category anchoring — each node is pulled toward the centroid of
+        // every category it belongs to. Two O(n) passes (accumulate the
+        // per-category sums, then apply per-node pulls) replace the prior
+        // O(n²) pairwise same-category Hooke loop, per ADR-0019 / ADR-0023
+        // (clustering goal) and the centroid-anchoring rework. Multi-
+        // category nodes feel one pull per owned centroid; the resultant
+        // vector lands at the average of those centroids, which is what
+        // positions shared nodes on the boundary between groups.
+        var categorySum: [UUID: CGPoint] = [:]
+        var categoryCount: [UUID: Int] = [:]
+        let nodeCategoryIDs: [[UUID]] = graph.nodes.map { $0.categories.map { $0.id } }
         for i in 0..<nodeCount {
-            let categoriesI = nodeCategoryIDs[i]
-            if categoriesI.isEmpty { continue }
-            let posIx = pos[i].x
-            let posIy = pos[i].y
-            for j in (i + 1)..<nodeCount {
-                let categoriesJ = nodeCategoryIDs[j]
-                if categoriesJ.isEmpty { continue }
-                if categoriesI.isDisjoint(with: categoriesJ) { continue }
-                let dx = posIx - pos[j].x
-                let dy = posIy - pos[j].y
-                let dist = max(sqrt(dx * dx + dy * dy), 1)
-                let force = dist * categoryClusterStrength
-                let unitX = dx / dist
-                let unitY = dy / dist
-                disp[i].x -= unitX * force
-                disp[i].y -= unitY * force
-                disp[j].x += unitX * force
-                disp[j].y += unitY * force
+            for catID in nodeCategoryIDs[i] {
+                categorySum[catID, default: .zero].x += pos[i].x
+                categorySum[catID, default: .zero].y += pos[i].y
+                categoryCount[catID, default: 0] += 1
+            }
+        }
+        var categoryCentroids: [UUID: CGPoint] = [:]
+        categoryCentroids.reserveCapacity(categoryCount.count)
+        for (catID, count) in categoryCount {
+            let c = CGFloat(count)
+            let sum = categorySum[catID] ?? .zero
+            categoryCentroids[catID] = CGPoint(x: sum.x / c, y: sum.y / c)
+        }
+        for i in 0..<nodeCount {
+            let cats = nodeCategoryIDs[i]
+            if cats.isEmpty { continue }
+            for catID in cats {
+                guard let centroid = categoryCentroids[catID] else { continue }
+                let dx = centroid.x - pos[i].x
+                let dy = centroid.y - pos[i].y
+                disp[i].x += dx * categoryAnchorStrength
+                disp[i].y += dy * categoryAnchorStrength
             }
         }
 
