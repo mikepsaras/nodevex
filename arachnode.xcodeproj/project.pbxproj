@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		273DFD222FA962FC00C9EE08 /* appicon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 273DFD212FA962FC00C9EE08 /* appicon.icon */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		277AABF12FA8D57400878909 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -17,6 +21,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		273DFD212FA962FC00C9EE08 /* appicon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = appicon.icon; sourceTree = "<group>"; };
 		277AABED2FA8D57400878909 /* arachnodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = arachnodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		27AA6CA02FA77CF300AED932 /* arachnode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = arachnode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -58,6 +63,7 @@
 				27AA6CA22FA77CF300AED932 /* arachnode */,
 				277AABEE2FA8D57400878909 /* arachnodeTests */,
 				27AA6CA12FA77CF300AED932 /* Products */,
+				273DFD212FA962FC00C9EE08 /* appicon.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -169,6 +175,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				273DFD222FA962FC00C9EE08 /* appicon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -363,7 +370,7 @@
 		27AA6CAC2FA77CF400AED932 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = appicon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -395,7 +402,7 @@
 		27AA6CAD2FA77CF400AED932 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = appicon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
