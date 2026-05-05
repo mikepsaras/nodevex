@@ -21,7 +21,12 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
         scrollView.allowsMagnification = true
-        scrollView.minMagnification = 0.25
+        // Floor of 0.5× — at deeper zoom-out the deterministic layout
+        // shrinks to a tiny island in empty canvas, since the layout's
+        // extent is a single screen and the document view is much larger.
+        // 0.5× lets the user see "more of the canvas at once" without
+        // the layout reading as a postage-stamp.
+        scrollView.minMagnification = 0.5
         scrollView.maxMagnification = 4.0
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
