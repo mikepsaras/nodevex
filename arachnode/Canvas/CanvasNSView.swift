@@ -149,8 +149,11 @@ final class CanvasNSView: NSView {
                 object: window
             )
         }
-        // Now that the view has a screen, recompute layout for the cached
-        // graph against the screen's actual visible frame.
+        // Now that the view has a screen, size the document to match the
+        // screen's visibleFrame so the canvas hugs the layout (no empty
+        // padding for zoom-out to reveal). Then recompute layout against
+        // those same bounds.
+        syncCanvasSize()
         if !graph.nodes.isEmpty {
             runLayout()
             needsDisplay = true
@@ -158,12 +161,21 @@ final class CanvasNSView: NSView {
     }
 
     /// Fired when the window moves to a different screen, or when display
-    /// hardware/configuration changes. Recompute layout against the new
-    /// bounds so the partition fills the active display.
+    /// hardware/configuration changes. Resize the canvas to match the new
+    /// screen, then recompute layout against the new bounds.
     @objc private func displayMayHaveChanged() {
+        syncCanvasSize()
         guard !graph.nodes.isEmpty else { return }
         runLayout()
         needsDisplay = true
+    }
+
+    /// Pass the current `layoutBounds().size` down to the enclosing
+    /// `CanvasScrollView` as the document size. Idempotent — the scroll
+    /// view skips no-op assignments.
+    private func syncCanvasSize() {
+        guard let scrollView = enclosingScrollView as? CanvasScrollView else { return }
+        scrollView.setCanvasSize(layoutBounds().size)
     }
 
     private func handleModalFocusChange(from oldID: UUID?, to newID: UUID?) {
