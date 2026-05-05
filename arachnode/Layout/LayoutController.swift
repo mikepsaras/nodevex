@@ -1,27 +1,35 @@
 import Foundation
 import CoreGraphics
 
-/// Top-level layout pipeline orchestrator. Coordinates the
-/// `RegionPartitioner` (divides the layout bounds among `CategoryKey`s)
-/// with the `CirclePacker` (packs each region's nodes inside its polygon).
-/// Synchronous, deterministic, fast — same graph + same bounds always
-/// produces the same `LayoutResult`.
+/// Top-level layout pipeline orchestrator. Three stages, all synchronous
+/// and deterministic — same graph + same bounds always produces the same
+/// `LayoutResult`:
 ///
-/// Both stages are protocol-typed so an alternate strategy (e.g. weighted
-/// vs unweighted partition, or a different packer) can be swapped in via
-/// `init(partitioner:packer:)` without touching call sites. The defaults
-/// — `VoronoiPartitioner` + `FrontChainPacker` — are what the canvas wires
-/// up in production.
+/// 1. **Partition** (`RegionPartitioner`) divides the layout bounds among
+///    the `CategoryKey`s actually present in the graph.
+/// 2. **Pack** (`CirclePacker`) places nodes tangent at the centroid of
+///    each cell — produces a tight cluster.
+/// 3. **Ripple** (`CellRippleSimulator`) spreads each cluster out within
+///    its cell using mutual repulsion + soft wall force, so nodes fill
+///    the cell instead of clumping at the centroid.
+///
+/// All three stages are typed so an alternate implementation (weighted vs
+/// unweighted partition, different packer, custom ripple parameters) can
+/// be swapped in via `init(partitioner:packer:rippler:)` without touching
+/// call sites.
 final class LayoutController {
     private let partitioner: RegionPartitioner
     private let packer: CirclePacker
+    private let rippler: CellRippleSimulator
 
     init(
         partitioner: RegionPartitioner = VoronoiPartitioner(),
-        packer: CirclePacker = FrontChainPacker()
+        packer: CirclePacker = FrontChainPacker(),
+        rippler: CellRippleSimulator = CellRippleSimulator()
     ) {
         self.partitioner = partitioner
         self.packer = packer
+        self.rippler = rippler
     }
 
     /// Compute a fresh layout for the given graph. `sizing` picks node radii
@@ -54,16 +62,27 @@ final class LayoutController {
             radii[node.id] = radius
         }
 
-        // 3. Pack each bucket inside its region. Nodes whose key didn't get
-        //    a region (e.g. partitioner squeezed it out) are silently dropped
-        //    from the positions map — the renderer just won't draw them.
-        //    With the current weighted-partition tuning this shouldn't happen.
+        // 3. Pack each bucket inside its region (tight cluster at centroid),
+        //    then ripple to spread the cluster out across the cell. The
+        //    pack→ripple pair turns "tight clump in the middle" into "spread
+        //    distribution filling the cell."
+        //
+        //    Nodes whose key didn't get a region (e.g. partitioner squeezed
+        //    it out) are silently dropped from positions — the renderer
+        //    just won't draw them. With weighted partitioning this is rare.
         var positions: [UUID: CGPoint] = [:]
         positions.reserveCapacity(graph.nodes.count)
         for (key, nodes) in nodesByKey {
             guard let region = regions[key] else { continue }
             let packed = packer.pack(nodes: nodes, in: region)
-            for (id, pos) in packed {
+            // Hand the packer's output to the ripple simulator. Each ripple
+            // call is self-contained — no shared state across keys.
+            let rippleInput = nodes.map { node -> (id: UUID, position: CGPoint, radius: CGFloat) in
+                let pos = packed[node.id] ?? region.centroid
+                return (id: node.id, position: pos, radius: node.radius)
+            }
+            let rippled = rippler.ripple(nodes: rippleInput, in: region)
+            for (id, pos) in rippled {
                 positions[id] = pos
             }
         }
