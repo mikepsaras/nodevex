@@ -52,7 +52,7 @@ struct InlineEditField: NSViewRepresentable {
                     editor.drawsBackground = false
                     editor.backgroundColor = .clear
                     let length = (editor.string as NSString).length
-                    editor.selectedRange = NSRange(location: length, length: 0)
+                    editor.selectedRange = NSRange(location: 0, length: length)
                 }
             }
         }
