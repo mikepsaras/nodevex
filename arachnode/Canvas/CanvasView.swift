@@ -7,6 +7,7 @@ struct CanvasView: NSViewRepresentable {
     var edgeVisibility: EdgeVisibilityMode
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
+    var appearanceMode: AppearanceMode
     @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
@@ -25,7 +26,7 @@ struct CanvasView: NSViewRepresentable {
         scrollView.verticalScrollElasticity = .allowed
         scrollView.horizontalScrollElasticity = .allowed
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = SemanticColors.AppKit.canvasBackground
+        scrollView.backgroundColor = SemanticColors.AppKit.canvasBackground(for: appearanceMode)
 
         let canvas = CanvasNSView()
         canvas.onSelectionChange = { [weak coordinator = context.coordinator] newSelection in
@@ -42,6 +43,7 @@ struct CanvasView: NSViewRepresentable {
     func updateNSView(_ nsView: CanvasScrollView, context: Context) {
         context.coordinator.parent = self
         guard let canvas = nsView.documentView as? CanvasNSView else { return }
+        nsView.backgroundColor = SemanticColors.AppKit.canvasBackground(for: appearanceMode)
         // Sort edges by id so render order is stable across @Query refetches —
         // otherwise overlapping edges flicker when SwiftData re-orders.
         let sortedEdges = edges.sorted(by: { $0.id.uuidString < $1.id.uuidString })
@@ -50,7 +52,8 @@ struct CanvasView: NSViewRepresentable {
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
             modalFocusedNodeID: modalFocusedNodeID,
-            edgeVisibility: edgeVisibility
+            edgeVisibility: edgeVisibility,
+            appearanceMode: appearanceMode
         )
     }
 

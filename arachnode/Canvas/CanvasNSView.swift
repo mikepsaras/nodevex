@@ -26,6 +26,7 @@ final class CanvasNSView: NSView {
     private var lastGraphSignature: Int?
 
     private var edgeVisibility: EdgeVisibilityMode = .animated
+    private var appearanceMode: AppearanceMode = .dim
     private var animationPhase: CGFloat = 0
     private var animationTimer: Timer?
 
@@ -75,7 +76,8 @@ final class CanvasNSView: NSView {
         graph: GraphSnapshot,
         selectedNodeIDs: Set<UUID>,
         modalFocusedNodeID: UUID?,
-        edgeVisibility: EdgeVisibilityMode
+        edgeVisibility: EdgeVisibilityMode,
+        appearanceMode: AppearanceMode
     ) {
         let signature = graphSignature(graph)
         if signature != lastGraphSignature {
@@ -90,6 +92,7 @@ final class CanvasNSView: NSView {
             self.selectedNodeIDs = selectedNodeIDs
         }
         self.edgeVisibility = edgeVisibility
+        self.appearanceMode = appearanceMode
 
         if modalFocusedNodeID != lastModalFocusedNodeID {
             handleModalFocusChange(from: lastModalFocusedNodeID, to: modalFocusedNodeID)
@@ -174,7 +177,8 @@ final class CanvasNSView: NSView {
             revealOpacity: currentRevealOpacity,
             edgeVisibility: edgeVisibility,
             animationPhase: animationPhase,
-            zoom: zoom
+            zoom: zoom,
+            appearanceMode: appearanceMode
         )
     }
 

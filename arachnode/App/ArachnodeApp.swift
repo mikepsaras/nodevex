@@ -4,11 +4,14 @@ import SwiftData
 @main
 struct ArachnodeApp: App {
     @State private var terminologyStore = TerminologyStore()
+    @State private var appearanceStore = AppearanceStore()
 
     var body: some Scene {
         WindowGroup {
             DocumentView()
                 .environment(\.terminology, terminologyStore.terminology.resolved())
+                .environment(\.appearanceMode, appearanceStore.mode)
+                .preferredColorScheme(appearanceStore.mode.colorScheme)
         }
         // Ephemeral (in-memory) storage during early development — every app
         // launch starts with an empty graph. Switch to DocumentGroup-based
@@ -22,7 +25,13 @@ struct ArachnodeApp: App {
         )
 
         Settings {
-            SettingsView(store: terminologyStore)
+            SettingsView(
+                terminologyStore: terminologyStore,
+                appearanceStore: appearanceStore
+            )
+            // Settings is a sibling Scene — it doesn't inherit colorScheme
+            // from WindowGroup, so re-apply it here.
+            .preferredColorScheme(appearanceStore.mode.colorScheme)
         }
     }
 }

@@ -25,9 +25,10 @@ struct CGCanvasRenderer: CanvasRenderer {
         revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat,
-        zoom: CGFloat
+        zoom: CGFloat,
+        appearanceMode: AppearanceMode
     ) {
-        context.setFillColor(SemanticColors.AppKit.canvasBackground.cgColor)
+        context.setFillColor(SemanticColors.AppKit.canvasBackground(for: appearanceMode).cgColor)
         context.fill(bounds)
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)

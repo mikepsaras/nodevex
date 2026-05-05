@@ -15,6 +15,17 @@ enum SemanticColors {
 
     enum AppKit {
         static var canvasBackground: NSColor { .windowBackgroundColor }
+        /// Dim mode: a noticeably lighter slate than system dark, so the canvas
+        /// (which dominates the window) reads as "muted" rather than near-black.
+        static let dimCanvasBackground: NSColor = NSColor(
+            srgbRed: 0x2E / 255.0,
+            green: 0x2E / 255.0,
+            blue: 0x32 / 255.0,
+            alpha: 1
+        )
+        static func canvasBackground(for mode: AppearanceMode) -> NSColor {
+            mode == .dim ? dimCanvasBackground : canvasBackground
+        }
         static var nodeFill: NSColor { .controlBackgroundColor }
         static var nodeFillSelected: NSColor { .controlAccentColor.withAlphaComponent(0.15) }
         static var nodeBorder: NSColor { .separatorColor }
