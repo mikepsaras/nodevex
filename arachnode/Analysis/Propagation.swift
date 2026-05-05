@@ -22,6 +22,27 @@ enum Propagation {
     ///
     /// Iterates up to `iterations` times or until the largest single-step value
     /// change drops below `convergenceThreshold`.
+    /// Convenience: pins every node whose intrinsic `value` is non-zero as a
+    /// propagation root, then runs the same iterative propagation. Lets
+    /// callers drive propagation directly from the model without building
+    /// the `[UUID: Double]` map themselves.
+    static func propagate(
+        graph: GraphSnapshot,
+        iterations: Int = 100,
+        convergenceThreshold: Double = 0.001
+    ) -> Result {
+        var initialValues: [UUID: Double] = [:]
+        for node in graph.nodes where node.value != 0 {
+            initialValues[node.id] = node.value
+        }
+        return propagate(
+            initialValues: initialValues,
+            graph: graph,
+            iterations: iterations,
+            convergenceThreshold: convergenceThreshold
+        )
+    }
+
     static func propagate(
         initialValues: [UUID: Double],
         graph: GraphSnapshot,

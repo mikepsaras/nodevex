@@ -51,6 +51,7 @@ struct NodeFocusView: View {
                     )
                 } else {
                     header
+                    valueSection
                     categoriesSection
                     EdgeSection(
                         title: terminology.inboundPlural,
@@ -99,6 +100,24 @@ struct NodeFocusView: View {
                     .foregroundStyle(SemanticColors.textSecondary)
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var valueSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Value")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SemanticColors.textSecondary)
+                Spacer()
+                Text(String(format: "%.2f", node.value))
+                    .font(.caption)
+                    .foregroundStyle(SemanticColors.textSecondary)
+                    .monospacedDigit()
+            }
+            Slider(value: $node.value, in: 0...1)
         }
     }
 
