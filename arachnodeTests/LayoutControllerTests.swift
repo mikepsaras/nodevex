@@ -171,6 +171,67 @@ struct LayoutControllerTests {
         #expect(rSmall < rBig)  // sanity check the sizing
     }
 
+    @Test("prepareLayout snaps initial positions outside the cell back inside")
+    func prepareLayoutClampsStrandedPositions() throws {
+        let context = try makeContext()
+        let cat = arachnode.Category(name: "Cat"); context.insert(cat)
+        let node = makeNode(context, name: "n", categories: [cat])
+        let graph = GraphSnapshot(nodes: [node], edges: [], categories: [cat])
+
+        // Pretend the node had a previous position way outside any
+        // reasonable cell — e.g., it migrated from a totally different
+        // cell that's since been removed.
+        let stranded: [UUID: CGPoint] = [
+            node.id: CGPoint(x: 100_000, y: 100_000)
+        ]
+
+        let live = controller.prepareLayout(
+            graph: graph,
+            sizing: .fixed,
+            bounds: bounds,
+            initialPositions: stranded
+        )
+
+        // Node must still be inside its assigned cell after preparation,
+        // even though `initialPositions` placed it far away. Without the
+        // fallback, the ripple's wall force can't recover stranded nodes
+        // and they'd float "regardless of voronoi cells" until dragged.
+        let region = live.regions[.single(cat.id)]!
+        let pos = live.positions[node.id]!
+        #expect(region.contains(pos))
+    }
+
+    @Test("prepareLayout preserves valid initial positions for smooth continuity")
+    func prepareLayoutKeepsValidInitialPositions() throws {
+        let context = try makeContext()
+        let cat = arachnode.Category(name: "Cat"); context.insert(cat)
+        let node = makeNode(context, name: "n", categories: [cat])
+        let graph = GraphSnapshot(nodes: [node], edges: [], categories: [cat])
+
+        // First, get the cell so we can pick a position that's actually
+        // inside it.
+        let firstLive = controller.prepareLayout(
+            graph: graph,
+            sizing: .fixed,
+            bounds: bounds
+        )
+        let region = firstLive.regions[.single(cat.id)]!
+        let insidePoint = region.centroid
+
+        // Now run prepareLayout again with that valid position seeded.
+        let live = controller.prepareLayout(
+            graph: graph,
+            sizing: .fixed,
+            bounds: bounds,
+            initialPositions: [node.id: insidePoint]
+        )
+
+        // The node should start at exactly the seeded position (no snap).
+        let pos = live.positions[node.id]!
+        #expect(abs(pos.x - insidePoint.x) < 1e-6)
+        #expect(abs(pos.y - insidePoint.y) < 1e-6)
+    }
+
     @Test("layout is deterministic — same graph + bounds produce same positions twice")
     func deterministic() throws {
         let context = try makeContext()

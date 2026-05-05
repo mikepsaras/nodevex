@@ -85,11 +85,23 @@ final class LayoutController {
             guard let region = regions[key] else { continue }
             let packed = packer.pack(nodes: nodes, in: region)
             let rippleInput = nodes.map { node -> (id: UUID, position: CGPoint, radius: CGFloat) in
-                // Existing node → start at its previous position so the
-                // ripple animates from "where it was" rather than snapping
-                // to the packer's reset. New node → start at the packer's
-                // chosen spot.
-                let pos = initialPositions[node.id] ?? packed[node.id] ?? region.centroid
+                // Smooth-continuity bias: if the node's previous position
+                // is still inside its (possibly reshaped) cell, start
+                // there so the ripple animates from "where it was" rather
+                // than snapping to the packer's reset. If the previous
+                // position is outside the new cell — which happens when
+                // cells reshape on graph mutation, especially around
+                // category changes — fall back to the packer's choice.
+                //
+                // The fallback matters: the ripple's wall force has a
+                // bounded activation range, so a node stranded far from
+                // its assigned cell can't be reeled in by the simulation
+                // alone. It would just float "regardless of cells" until
+                // a drag forced it back. Validate up-front instead.
+                let proposed = initialPositions[node.id] ?? packed[node.id] ?? region.centroid
+                let pos = region.contains(proposed)
+                    ? proposed
+                    : (packed[node.id] ?? region.centroid)
                 return (id: node.id, position: pos, radius: node.radius)
             }
             rippleStates[key] = rippler.makeState(nodes: rippleInput, in: region)
