@@ -202,7 +202,8 @@ final class CanvasNSView: NSView {
     /// bounds, refreshing cached positions and radii. The renderer reads
     /// from these caches via `effectivePositions`, which interpolates
     /// between `previousPositions` and `positions` while a transition is
-    /// active.
+    /// active. Radii now come straight from the LayoutResult — the
+    /// controller is the single source of truth.
     private func runLayout() {
         let positionsBefore = positions
         let result = layoutController.computeLayout(
@@ -212,7 +213,7 @@ final class CanvasNSView: NSView {
         )
         lastLayoutResult = result
         positions = result.positions
-        radii = computeRadii(graph: graph, sizing: nodeSizing)
+        radii = result.radii
         // Trigger a transition only if there was a prior layout to slide
         // from. First-time layout (empty positionsBefore) snaps into place
         // without animation.
@@ -560,15 +561,6 @@ final class CanvasNSView: NSView {
             }
         }
         return nil
-    }
-
-    private func computeRadii(graph: GraphSnapshot, sizing: NodeSizingMode) -> [UUID: CGFloat] {
-        var result: [UUID: CGFloat] = [:]
-        result.reserveCapacity(graph.nodes.count)
-        for node in graph.nodes {
-            result[node.id] = sizing.radius(forValue: node.value)
-        }
-        return result
     }
 
     private func graphSignature(_ graph: GraphSnapshot) -> Int {

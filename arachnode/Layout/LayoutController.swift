@@ -40,12 +40,18 @@ final class LayoutController {
         let regions = partitioner.partition(graph: graph, bounds: bounds)
 
         // 2. Bucket nodes by their CategoryKey, computing radii up front.
+        //    Radii are also returned in the LayoutResult so the renderer and
+        //    hit-testing path read from the same source of truth — no
+        //    side-channel recomputation in CanvasNSView.
         var nodesByKey: [CategoryKey: [(id: UUID, radius: CGFloat)]] = [:]
+        var radii: [UUID: CGFloat] = [:]
+        radii.reserveCapacity(graph.nodes.count)
         for node in graph.nodes {
             let ids = node.categories.map { $0.id }
             let key = CategoryKey.from(categoryIDs: ids)
             let radius = sizing.radius(forValue: node.value)
             nodesByKey[key, default: []].append((id: node.id, radius: radius))
+            radii[node.id] = radius
         }
 
         // 3. Pack each bucket inside its region. Nodes whose key didn't get
@@ -62,6 +68,6 @@ final class LayoutController {
             }
         }
 
-        return LayoutResult(positions: positions, regions: regions)
+        return LayoutResult(positions: positions, radii: radii, regions: regions)
     }
 }
