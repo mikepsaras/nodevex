@@ -2,9 +2,13 @@ import SwiftUI
 
 struct CanvasFooter: View {
     @Binding var edgeVisibility: EdgeVisibilityMode
+    let onResetLayout: () -> Void
 
     var body: some View {
-        visibilityMenu
+        HStack(spacing: 8) {
+            visibilityMenu
+            relayoutButton
+        }
     }
 
     private var visibilityMenu: some View {
@@ -32,5 +36,22 @@ struct CanvasFooter: View {
         .buttonStyle(.plain)
         .font(.caption)
         .foregroundStyle(SemanticColors.textSecondary)
+    }
+
+    private var relayoutButton: some View {
+        Button(action: onResetLayout) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.caption2)
+                Text("Re-layout")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .foregroundStyle(SemanticColors.textSecondary)
+        .help("Reshuffle node positions and resettle")
     }
 }
