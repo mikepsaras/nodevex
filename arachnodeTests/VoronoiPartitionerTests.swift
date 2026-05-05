@@ -154,6 +154,57 @@ struct VoronoiPartitionerTests {
         #expect(abs(totalArea - boundsArea) < boundsArea * 0.01)
     }
 
+    @Test("solo category cell is centered on the canvas (hub-and-spoke)")
+    func soloCategoryAtCenter() throws {
+        let context = try makeContext()
+        let cat = arachnode.Category(name: "Cat"); context.insert(cat)
+        let n = makeNode(context, name: "n", categories: [cat])
+        let graph = GraphSnapshot(nodes: [n], edges: [], categories: [cat])
+
+        let result = partitioner.partition(graph: graph, bounds: bounds)
+        let region = result[.single(cat.id)]!
+        // The solo cell covers the bounds — centroid should be at the
+        // canvas center.
+        let canvasCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        #expect(abs(region.centroid.x - canvasCenter.x) < 1)
+        #expect(abs(region.centroid.y - canvasCenter.y) < 1)
+    }
+
+    @Test("first-created category gets the center hub; later ones go to the spokes")
+    func hubAndSpokeOrdering() throws {
+        let context = try makeContext()
+        // Create categories in a specific order so `createdAt` is
+        // deterministic. The first to be inserted gets the hub.
+        let hub = arachnode.Category(name: "Hub"); context.insert(hub)
+        let spokeA = arachnode.Category(name: "SpokeA"); context.insert(spokeA)
+        let spokeB = arachnode.Category(name: "SpokeB"); context.insert(spokeB)
+        let nHub = makeNode(context, name: "h", categories: [hub])
+        let nA = makeNode(context, name: "a", categories: [spokeA])
+        let nB = makeNode(context, name: "b", categories: [spokeB])
+        let graph = GraphSnapshot(
+            nodes: [nHub, nA, nB],
+            edges: [],
+            categories: [hub, spokeA, spokeB]
+        )
+
+        let result = partitioner.partition(graph: graph, bounds: bounds)
+        let canvasCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        // Each cell's centroid is some signal of its anchor location.
+        // The hub's cell centroid should be much closer to the canvas
+        // center than either spoke's.
+        let hubCentroid = result[.single(hub.id)]!.centroid
+        let spokeACentroid = result[.single(spokeA.id)]!.centroid
+        let spokeBCentroid = result[.single(spokeB.id)]!.centroid
+
+        let hubDist = hypot(hubCentroid.x - canvasCenter.x, hubCentroid.y - canvasCenter.y)
+        let spokeADist = hypot(spokeACentroid.x - canvasCenter.x, spokeACentroid.y - canvasCenter.y)
+        let spokeBDist = hypot(spokeBCentroid.x - canvasCenter.x, spokeBCentroid.y - canvasCenter.y)
+
+        #expect(hubDist < spokeADist)
+        #expect(hubDist < spokeBDist)
+    }
+
     @Test("partitioning is deterministic — same graph produces same regions twice")
     func deterministic() throws {
         let context = try makeContext()

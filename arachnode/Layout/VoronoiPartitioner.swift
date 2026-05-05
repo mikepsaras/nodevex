@@ -19,16 +19,25 @@ import CoreGraphics
 /// shifted from the midpoint by (w_i − w_j) / (2·‖j − i‖) toward j. Larger
 /// w_i shifts the bisector away from i, growing i's cell.
 ///
-/// Seed positions:
-/// - **Single-category** seeds sit on an inner ring (radius 30% of
-///   min(bounds.width, bounds.height)), evenly spaced by angle, sorted by
-///   UUID for stability. Categorized cells dominate the central area.
+/// Seed positions follow a hub-and-spoke layout:
+/// - **First (earliest-created) single-category** seed sits at the canvas
+///   center — the hub.
+/// - **Remaining single-category** seeds fill the spokes — evenly
+///   distributed by angle on a ring around the hub at
+///   `innerRingFraction × min(bounds.width, bounds.height)`. Sort order is
+///   `createdAt` ascending with UUID tiebreaker, so adding a new category
+///   appends to the ring without reshuffling existing positions.
 /// - **Combination** seeds sit at the centroid of their constituent
 ///   single-category seeds — a node in {A, B} ends up in the cell wedged
 ///   between A's and B's cells (the "Venn middle").
 /// - **Uncategorized** seed sits near the top-right corner of bounds, so
 ///   its cell is the peripheral wedge. Categorized cells take visual
 ///   priority from the center outward.
+///
+/// For 7 categories this gives the classic "1 in the middle, 6 around it"
+/// honeycomb. For other counts it degrades gracefully — 2 categories
+/// place the second across from the center, 8 spread on the ring at ~51°
+/// each, etc.
 struct VoronoiPartitioner: RegionPartitioner {
     /// Inner-ring radius for single-category seeds, as a fraction of
     /// `min(bounds.width, bounds.height)`.
@@ -44,7 +53,11 @@ struct VoronoiPartitioner: RegionPartitioner {
         let keyCounts = countNodesByKey(graph)
         guard !keyCounts.isEmpty else { return [:] }
 
-        let seeds = computeSeeds(keyCounts: keyCounts, bounds: bounds)
+        let seeds = computeSeeds(
+            keyCounts: keyCounts,
+            categories: graph.categories,
+            bounds: bounds
+        )
         let boundsPolygon = polygon(for: bounds)
 
         var result: [CategoryKey: Region] = [:]
@@ -85,23 +98,49 @@ struct VoronoiPartitioner: RegionPartitioner {
         return counts
     }
 
-    private func computeSeeds(keyCounts: [CategoryKey: Int], bounds: CGRect) -> [Seed] {
+    private func computeSeeds(
+        keyCounts: [CategoryKey: Int],
+        categories: [Category],
+        bounds: CGRect
+    ) -> [Seed] {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let innerRadius = min(bounds.width, bounds.height) * innerRingFraction
 
-        // Stable per-category ring slot: sort UUIDs to make the assignment
-        // deterministic across runs (and across re-partitions of the same
-        // graph).
+        // Hub-and-spoke seeding. The earliest-created category goes at the
+        // canvas center; each subsequent category fills a slot on the ring
+        // around it, evenly distributed by angle. This gives the
+        // "1-in-the-middle, 6-around" honeycomb feel for typical 7-category
+        // graphs and degrades gracefully for any other count: 2 categories
+        // place the second across from the center, 8 spread on the ring at
+        // ~51° each, and so on.
+        //
+        // Sort by `createdAt` (oldest first) with UUID tiebreaker so the
+        // ordering is deterministic AND user-meaningful — the first
+        // category the user creates gets the center, and adding a new
+        // category appends to the outer ring instead of reshuffling.
+        var categoryByID: [UUID: Category] = [:]
+        for cat in categories { categoryByID[cat.id] = cat }
         let singleCategoryIDs: [UUID] = keyCounts.keys.compactMap { key in
             if case .single(let id) = key { return id }
             return nil
-        }.sorted(by: { $0.uuidString < $1.uuidString })
+        }.sorted { lhs, rhs in
+            let lhsTime = categoryByID[lhs]?.createdAt ?? .distantPast
+            let rhsTime = categoryByID[rhs]?.createdAt ?? .distantPast
+            if lhsTime != rhsTime { return lhsTime < rhsTime }
+            return lhs.uuidString < rhs.uuidString
+        }
 
         var anchorByCategory: [UUID: CGPoint] = [:]
-        if !singleCategoryIDs.isEmpty {
-            let slotStep = (2 * .pi) / CGFloat(singleCategoryIDs.count)
-            for (idx, id) in singleCategoryIDs.enumerated() {
-                let angle = CGFloat(idx) * slotStep
+        if singleCategoryIDs.count == 1 {
+            // Solo category — at the canvas center.
+            anchorByCategory[singleCategoryIDs[0]] = center
+        } else if singleCategoryIDs.count > 1 {
+            // First (oldest) → center. Remaining → evenly distributed ring.
+            anchorByCategory[singleCategoryIDs[0]] = center
+            let outerCount = singleCategoryIDs.count - 1
+            let slotStep = (2 * .pi) / CGFloat(outerCount)
+            for (offset, id) in singleCategoryIDs.dropFirst().enumerated() {
+                let angle = CGFloat(offset) * slotStep
                 anchorByCategory[id] = CGPoint(
                     x: center.x + cos(angle) * innerRadius,
                     y: center.y + sin(angle) * innerRadius
