@@ -440,6 +440,12 @@ final class CanvasNSView: NSView {
             needsDisplay = true
         }
 
+        // Pointing-hand when the cursor is over a node OR while a drag is in
+        // flight (so the grab cue persists through the gesture, even though
+        // hover is suppressed during drag). Plain arrow otherwise.
+        let overNode = nodeID != nil || dragState?.didCrossThreshold == true
+        (overNode ? NSCursor.pointingHand : NSCursor.arrow).set()
+
         // A reveal is already active (any source, any phase except modal-visible
         // which we excluded above). The user's hover target wins immediately —
         // no delay, no fade-in — so an in-flight reveal can be redirected or
