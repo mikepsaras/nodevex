@@ -19,10 +19,11 @@ struct RevealState {
 
 final class CanvasNSView: NSView {
     private let renderer: CanvasRenderer = CGCanvasRenderer()
-    private let layoutEngine = LayoutEngine()
+    private let layoutController = LayoutController()
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
+    private var lastLayoutResult = LayoutResult.empty
     private var positions: [UUID: CGPoint] = [:]
-    /// Per-node display radius. Recomputed on every update() — driven by the
+    /// Per-node display radius. Recomputed on every layout — driven by the
     /// current `NodeSizingMode` and each node's intrinsic value. Used by the
     /// renderer for circle/edge geometry and by hit-testing for click target.
     private var radii: [UUID: CGFloat] = [:]
@@ -32,7 +33,6 @@ final class CanvasNSView: NSView {
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
     private var appearanceMode: AppearanceMode = .dim
-    private var lastResetLayoutVersion: Int = 0
     private var animationPhase: CGFloat = 0
     private var animationTimer: Timer?
 
@@ -56,24 +56,12 @@ final class CanvasNSView: NSView {
     private var trackingArea: NSTrackingArea?
     private var lastModalFocusedNodeID: UUID?
 
-    /// Node hit on mouseDown. Consumed on mouseUp to decide whether to open
-    /// the focus modal — cleared the moment a drag is detected so that a
-    /// click-then-drag doesn't *also* fire the modal on release.
+    /// Node hit on mouseDown. Consumed on mouseUp to fire `onNodeFocus`
+    /// for plain clicks (no modifiers).
     private var pendingClickNodeID: UUID?
 
-    /// Drag bookkeeping. The cursor's canvas-relative point at mouseDown,
-    /// the dragged node's position at that moment, and a flag for whether
-    /// motion has crossed the click→drag threshold.
-    private struct DragState {
-        let nodeID: UUID
-        let downCanvasPoint: CGPoint
-        let originalNodePosition: CGPoint
-        var didCrossThreshold: Bool
-    }
-    private var dragState: DragState?
-    private let dragThreshold: CGFloat = 3
-
     deinit {
+        NotificationCenter.default.removeObserver(self)
         animationTimer?.invalidate()
         hoverDelayTimer?.invalidate()
     }
@@ -84,32 +72,24 @@ final class CanvasNSView: NSView {
         modalFocusedNodeID: UUID?,
         edgeVisibility: EdgeVisibilityMode,
         nodeSizing: NodeSizingMode,
-        appearanceMode: AppearanceMode,
-        resetLayoutVersion: Int
+        appearanceMode: AppearanceMode
     ) {
         let signature = graphSignature(graph)
-        if signature != lastGraphSignature {
+        let sizingChanged = self.nodeSizing != nodeSizing
+        let needsRelayout = signature != lastGraphSignature || sizingChanged
+        if needsRelayout {
             self.graph = graph
-            layoutEngine.applyGraphChange(graph, seedOrigin: currentViewportCenterWorld())
-            self.positions = layoutEngine.positions
+            self.nodeSizing = nodeSizing
+            runLayout()
             lastGraphSignature = signature
         } else {
             self.graph = graph
-        }
-        if resetLayoutVersion != lastResetLayoutVersion {
-            layoutEngine.reseedAll(seedOrigin: currentViewportCenterWorld())
-            positions = layoutEngine.positions
-            lastResetLayoutVersion = resetLayoutVersion
         }
         if self.selectedNodeIDs != selectedNodeIDs {
             self.selectedNodeIDs = selectedNodeIDs
         }
         self.edgeVisibility = edgeVisibility
-        self.nodeSizing = nodeSizing
         self.appearanceMode = appearanceMode
-        // Recompute every update — value and sizing-mode changes don't shift
-        // graphSignature, so the renderer needs a fresh map each time.
-        self.radii = computeRadii(graph: graph, sizing: nodeSizing)
 
         if modalFocusedNodeID != lastModalFocusedNodeID {
             handleModalFocusChange(from: lastModalFocusedNodeID, to: modalFocusedNodeID)
@@ -117,6 +97,43 @@ final class CanvasNSView: NSView {
         }
 
         updateAnimationTimer()
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Re-register screen-change observers for the new window. Removing
+        // any prior observers first keeps things clean if the view is moved
+        // between windows.
+        NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(displayMayHaveChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(displayMayHaveChanged),
+                name: NSWindow.didChangeScreenNotification,
+                object: window
+            )
+        }
+        // Now that the view has a screen, recompute layout for the cached
+        // graph against the screen's actual visible frame.
+        if !graph.nodes.isEmpty {
+            runLayout()
+            needsDisplay = true
+        }
+    }
+
+    /// Fired when the window moves to a different screen, or when display
+    /// hardware/configuration changes. Recompute layout against the new
+    /// bounds so the partition fills the active display.
+    @objc private func displayMayHaveChanged() {
+        guard !graph.nodes.isEmpty else { return }
+        runLayout()
         needsDisplay = true
     }
 
@@ -154,16 +171,34 @@ final class CanvasNSView: NSView {
         }
     }
 
-    /// Center of the visible scroll-view region in canvas-center-relative
-    /// coords. Used as the seed origin for newly-created nodes so they spawn
-    /// where the user is currently looking, not at the canvas origin.
-    private func currentViewportCenterWorld() -> CGPoint {
-        guard let scrollView = enclosingScrollView else { return .zero }
-        let visible = scrollView.documentVisibleRect
-        return CGPoint(
-            x: visible.midX - bounds.midX,
-            y: visible.midY - bounds.midY
+    /// Layout extent — the active screen's visible frame, centered at the
+    /// world origin. Display-pegged: the layout fills the screen at its
+    /// native dimensions regardless of the current window size, and only
+    /// re-runs when the screen itself changes (different display or
+    /// display-config event), not on window resize.
+    private func layoutBounds() -> CGRect {
+        let size = window?.screen?.visibleFrame.size
+            ?? CGSize(width: 1500, height: 1500)
+        return CGRect(
+            x: -size.width / 2,
+            y: -size.height / 2,
+            width: size.width,
+            height: size.height
         )
+    }
+
+    /// Re-run the layout pipeline against the current graph, sizing, and
+    /// bounds, refreshing cached positions and radii. The renderer reads
+    /// from these caches, so this is the single point of layout truth.
+    private func runLayout() {
+        let result = layoutController.computeLayout(
+            graph: graph,
+            sizing: nodeSizing,
+            bounds: layoutBounds()
+        )
+        lastLayoutResult = result
+        positions = result.positions
+        radii = computeRadii(graph: graph, sizing: nodeSizing)
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling
@@ -218,10 +253,10 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Timer drives three things: arrow flow on animated edges, hover-reveal
-        // fade transitions, and the continuous force-physics tick (which also
-        // applies the drag override). Run while any of them is active.
-        if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive || layoutEngine.isDragging {
+        // Timer drives two things: arrow flow on animated edges, and the
+        // hover-reveal fade transitions. The deterministic layout doesn't
+        // tick — there's no continuous physics anymore.
+        if edgeVisibility == .animated || reveal != nil {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -240,15 +275,7 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
-            // One physics step per frame. Pulls dragged nodes via overrides,
-            // applies forces to the rest, decays alpha. When alpha settles
-            // and other animation reasons go quiet, the timer self-stops.
-            self.layoutEngine.tick()
-            self.positions = self.layoutEngine.positions
-            // If physics finished settling but other animations are still
-            // active, we keep ticking; if everything's quiet, recompute the
-            // timer state.
-            if !self.layoutEngine.isActive && !self.layoutEngine.isDragging && self.edgeVisibility != .animated && self.reveal == nil {
+            if self.edgeVisibility != .animated && self.reveal == nil {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -307,23 +334,13 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
-        // Track click + drag intent in parallel. mouseUp picks the right one
-        // based on whether motion crossed the drag threshold.
-        pendingClickNodeID = hitID
-        if let hitID, let originalPos = positions[hitID] {
-            dragState = DragState(
-                nodeID: hitID,
-                downCanvasPoint: canvasPoint,
-                originalNodePosition: originalPos,
-                didCrossThreshold: false
-            )
-        } else {
-            dragState = nil
-        }
-
-        // Plain click no longer selects — it opens the focus modal on mouseUp.
+        // Plain click on a node opens the focus modal (consumed in mouseUp).
         // Selection requires shift (add) or command (toggle). Click on empty
-        // canvas without a modifier still clears the selection.
+        // canvas without a modifier clears the selection. Drag is no longer
+        // a gesture — the deterministic layout doesn't accept manual
+        // perturbation, so there's no DragState bookkeeping to maintain.
+        pendingClickNodeID = hitID
+
         var newSelection = selectedNodeIDs
         if let hitID {
             if modifiers.contains(.shift) {
@@ -345,55 +362,8 @@ final class CanvasNSView: NSView {
         onSelectionChange?(newSelection)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard var state = dragState else { return }
-        let cursorInView = convert(event.locationInWindow, from: nil)
-        // Clamp the cursor to the visible viewport in canvas-local coords so
-        // the dragged node sticks to the viewport edge if the cursor crosses it.
-        let clampedView = clampToVisibleViewport(cursorInView)
-        let canvasPoint = CGPoint(
-            x: clampedView.x - bounds.midX,
-            y: clampedView.y - bounds.midY
-        )
-        let dx = canvasPoint.x - state.downCanvasPoint.x
-        let dy = canvasPoint.y - state.downCanvasPoint.y
-        let nodePosition = CGPoint(
-            x: state.originalNodePosition.x + dx,
-            y: state.originalNodePosition.y + dy
-        )
-
-        if !state.didCrossThreshold && (dx * dx + dy * dy) > dragThreshold * dragThreshold {
-            state.didCrossThreshold = true
-            // Crossing the threshold means this is a drag, not a click.
-            // Cancel the modal-open path and notify the engine so the dragged
-            // node's position is overridden each tick while neighbors react
-            // to it via the regular forces.
-            pendingClickNodeID = nil
-            layoutEngine.startDrag(nodeID: state.nodeID, position: nodePosition)
-            // Suppress hover/highlight while dragging.
-            updateHover(target: nil)
-        } else if state.didCrossThreshold {
-            layoutEngine.updateDrag(position: nodePosition)
-        }
-
-        dragState = state
-        // Keep the timer awake so the drag override applies each tick.
-        updateAnimationTimer()
-    }
-
     override func mouseUp(with event: NSEvent) {
-        defer {
-            dragState = nil
-            pendingClickNodeID = nil
-        }
-
-        if let state = dragState, state.didCrossThreshold {
-            // Drag end — clear the engine's fix and let residual alpha pull
-            // the node back toward force equilibrium.
-            layoutEngine.endDrag()
-            return
-        }
-
+        defer { pendingClickNodeID = nil }
         guard let nodeID = pendingClickNodeID else { return }
         let modifiers = event.modifierFlags
         if modifiers.isDisjoint(with: [.shift, .command, .option]) {
@@ -401,25 +371,7 @@ final class CanvasNSView: NSView {
         }
     }
 
-    /// Clamp a point in this view's coords to the enclosing scroll view's
-    /// visible region. Used during drag so the dragged node sticks to the
-    /// viewport edge when the cursor goes past it.
-    private func clampToVisibleViewport(_ point: CGPoint) -> CGPoint {
-        guard let scrollView = enclosingScrollView else { return point }
-        let visibleRect = scrollView.contentView.bounds
-        return CGPoint(
-            x: min(max(point.x, visibleRect.minX), visibleRect.maxX),
-            y: min(max(point.y, visibleRect.minY), visibleRect.maxY)
-        )
-    }
-
     override func mouseMoved(with event: NSEvent) {
-        // Don't reveal during a drag — the user is busy with another gesture.
-        // (mouseMoved typically doesn't fire during a drag, but be explicit.)
-        if dragState?.didCrossThreshold == true {
-            updateHover(target: nil)
-            return
-        }
         let pointInView = convert(event.locationInWindow, from: nil)
         let canvasPoint = CGPoint(
             x: pointInView.x - bounds.midX,
@@ -455,11 +407,8 @@ final class CanvasNSView: NSView {
             needsDisplay = true
         }
 
-        // Pointing-hand when the cursor is over a node OR while a drag is in
-        // flight (so the grab cue persists through the gesture, even though
-        // hover is suppressed during drag). Plain arrow otherwise.
-        let overNode = nodeID != nil || dragState?.didCrossThreshold == true
-        (overNode ? NSCursor.pointingHand : NSCursor.arrow).set()
+        // Pointing-hand when the cursor is over a node, plain arrow otherwise.
+        (nodeID != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
 
         // A reveal is already active (any source, any phase except modal-visible
         // which we excluded above). The user's hover target wins immediately —
@@ -551,11 +500,13 @@ final class CanvasNSView: NSView {
 
     private func graphSignature(_ graph: GraphSnapshot) -> Int {
         // Build sets so the hash is independent of the array order @Query
-        // returns. Without this, a SwiftUI re-render that re-fetches edges
-        // in a different order would change the signature, fire a relayout,
-        // and shift node positions — that's the "node drifts when toggling
-        // edge visibility" blip.
-        let nodeIDs: Set<UUID> = Set(graph.nodes.map { $0.id })
+        // returns — a SwiftUI re-render that re-fetches edges in a different
+        // order would otherwise change the signature and trigger an
+        // unnecessary relayout. Node fingerprints include `value`, so when
+        // a user adjusts a node's value-slider in the modal (which can
+        // change its display radius under `.scaledByValue`), the signature
+        // moves and the layout re-runs.
+        let nodeFingerprints: Set<String> = Set(graph.nodes.map { "\($0.id):\($0.value)" })
         let categoryMemberships: Set<String> = Set(graph.nodes.flatMap { node in
             node.categories.map { "\(node.id):\($0.id)" }
         })
@@ -564,7 +515,7 @@ final class CanvasNSView: NSView {
         })
 
         var hasher = Hasher()
-        hasher.combine(nodeIDs)
+        hasher.combine(nodeFingerprints)
         hasher.combine(categoryMemberships)
         hasher.combine(edgeFingerprints)
         return hasher.finalize()
