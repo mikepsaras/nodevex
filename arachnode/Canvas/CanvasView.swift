@@ -7,6 +7,7 @@ struct CanvasView: NSViewRepresentable {
     var edgeVisibility: EdgeVisibilityMode
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
+    var resetLayoutVersion: Int
     @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
@@ -50,7 +51,8 @@ struct CanvasView: NSViewRepresentable {
             graph: snapshot,
             selectedNodeIDs: selectedNodeIDs,
             modalFocusedNodeID: modalFocusedNodeID,
-            edgeVisibility: edgeVisibility
+            edgeVisibility: edgeVisibility,
+            resetLayoutVersion: resetLayoutVersion
         )
     }
 
