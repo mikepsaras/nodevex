@@ -20,12 +20,14 @@ import CoreGraphics
 /// rare; if it happens it's a visual cue that a region is undersized
 /// relative to its node count.
 struct FrontChainPacker: CirclePacker {
-    /// Padding added to each circle's radius during packing math. The
-    /// packer places circles tangent in inflated radii, which means the
-    /// rendered (unpadded) circles end up with `2 × nodeSpacing` of
-    /// visible gap between them. Tunable: lower for tighter packings,
-    /// higher for airier.
-    private let nodeSpacing: CGFloat = 3
+    /// Per-circle padding fraction used during packing math — each circle's
+    /// radius is inflated by `radius × spacingFraction` (with a floor of
+    /// `minSpacing`) before placement. Proportional spacing reads more
+    /// naturally than a fixed-pixel pad: large circles get bigger gaps,
+    /// small circles get smaller gaps, instead of the same absolute padding
+    /// crushing the small ones and barely showing on the large ones.
+    private let spacingFraction: CGFloat = 0.15
+    private let minSpacing: CGFloat = 2
 
     func pack(
         nodes: [(id: UUID, radius: CGFloat)],
@@ -37,7 +39,10 @@ struct FrontChainPacker: CirclePacker {
         // — the renderer reads positions and original radii separately, so
         // the gap appears between rendered circles.
         let originalRadii = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.radius) })
-        let inflated = nodes.map { (id: $0.id, radius: $0.radius + nodeSpacing) }
+        let inflated = nodes.map { node -> (id: UUID, radius: CGFloat) in
+            let pad = max(node.radius * spacingFraction, minSpacing)
+            return (id: node.id, radius: node.radius + pad)
+        }
         let sorted = inflated.sorted(by: { $0.radius > $1.radius })
         let packed = packCircles(sorted)
 
