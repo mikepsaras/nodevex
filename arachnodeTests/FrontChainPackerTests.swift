@@ -32,8 +32,8 @@ struct FrontChainPackerTests {
         #expect(abs(pos.y - centroid.y) < 1e-6)
     }
 
-    @Test("two circles are tangent (distance = sum of radii)")
-    func twoCirclesTangent() {
+    @Test("two circles do not overlap (centers ≥ sum of radii apart)")
+    func twoCirclesNonOverlapping() {
         let a = UUID(), b = UUID()
         let result = packer.pack(
             nodes: [(id: a, radius: 5), (id: b, radius: 3)],
@@ -44,25 +44,34 @@ struct FrontChainPackerTests {
         let dx = pa.x - pb.x
         let dy = pa.y - pb.y
         let dist = sqrt(dx * dx + dy * dy)
-        #expect(abs(dist - 8) < 1e-3)
+        // Packer inflates radii by `nodeSpacing` for packing math, so the
+        // returned distance is always at least the sum of radii — equality
+        // would mean tangent (zero gap), which the spacing pad prevents.
+        #expect(dist >= 8 - 1e-3)
     }
 
-    @Test("three equal circles form an equilateral triangle")
-    func threeEqualCirclesTriangle() {
+    @Test("three equal circles produce an equilateral arrangement")
+    func threeEqualCirclesEquilateral() {
         let ids = [UUID(), UUID(), UUID()]
         let result = packer.pack(
             nodes: ids.map { (id: $0, radius: CGFloat(5)) },
             in: bigSquare
         )
         let positions = ids.map { result[$0]! }
-        // All three pairwise distances should equal 2*r = 10 (tangent pairs).
-        for i in 0..<3 {
-            for j in (i + 1)..<3 {
+        // All three pairwise distances should be equal (rotational symmetry).
+        // The exact value depends on the spacing pad — what matters is they
+        // all match each other, and each is at least `2 * r`.
+        let distances: [CGFloat] = (0..<3).flatMap { i in
+            ((i + 1)..<3).map { j in
                 let dx = positions[i].x - positions[j].x
                 let dy = positions[i].y - positions[j].y
-                let dist = sqrt(dx * dx + dy * dy)
-                #expect(abs(dist - 10) < 1e-3)
+                return sqrt(dx * dx + dy * dy)
             }
+        }
+        #expect(distances.count == 3)
+        for i in 0..<3 {
+            #expect(abs(distances[i] - distances[0]) < 1e-3)
+            #expect(distances[i] >= 10 - 1e-3)
         }
     }
 

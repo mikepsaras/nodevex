@@ -6,6 +6,13 @@ import CoreGraphics
 /// front-chain neighbors, walking outward. Produces dense, deterministic,
 /// roughly-circular cluster packings.
 ///
+/// Each circle's radius is inflated by `nodeSpacing` for the packing math
+/// only — the returned positions are in the natural unpadded coord system,
+/// so the renderer draws circles at their actual size with `2 × nodeSpacing`
+/// of breathing room between them. Tangent-look-and-feel is rarely what you
+/// want visually; a small gap reads as a deliberate arrangement instead of
+/// a dense pile.
+///
 /// After packing in pack-local coordinates, the cluster is translated so
 /// its area-weighted centroid aligns with the region centroid. Overflow
 /// (circles extending outside the polygon) is accepted — the renderer
@@ -13,19 +20,33 @@ import CoreGraphics
 /// rare; if it happens it's a visual cue that a region is undersized
 /// relative to its node count.
 struct FrontChainPacker: CirclePacker {
+    /// Padding added to each circle's radius during packing math. The
+    /// packer places circles tangent in inflated radii, which means the
+    /// rendered (unpadded) circles end up with `2 × nodeSpacing` of
+    /// visible gap between them. Tunable: lower for tighter packings,
+    /// higher for airier.
+    private let nodeSpacing: CGFloat = 3
+
     func pack(
         nodes: [(id: UUID, radius: CGFloat)],
         in region: Region
     ) -> [UUID: CGPoint] {
         guard !nodes.isEmpty else { return [:] }
 
-        let sorted = nodes.sorted(by: { $0.radius > $1.radius })
+        // Inflate radii for packing math. Returned positions are unaffected
+        // — the renderer reads positions and original radii separately, so
+        // the gap appears between rendered circles.
+        let originalRadii = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.radius) })
+        let inflated = nodes.map { (id: $0.id, radius: $0.radius + nodeSpacing) }
+        let sorted = inflated.sorted(by: { $0.radius > $1.radius })
         let packed = packCircles(sorted)
 
-        // Translate cluster so its area-weighted centroid lands at the
-        // region's centroid. Larger circles dominate the centering since
-        // they dominate visual mass.
-        let clusterCenter = areaWeightedCentroid(of: packed)
+        // Translate cluster so its area-weighted centroid (computed against
+        // the original, *visible* radii) lands at the region's centroid.
+        // Centering by inflated radii would put the gaps' weight in the
+        // mass calculation, off-balancing the visible result for non-
+        // uniform-radius packings.
+        let clusterCenter = areaWeightedCentroid(of: packed, weights: originalRadii)
         let target = region.centroid
         let dx = target.x - clusterCenter.x
         let dy = target.y - clusterCenter.y
@@ -220,16 +241,21 @@ struct FrontChainPacker: CirclePacker {
         return dx * dx + dy * dy
     }
 
-    /// Area-weighted centroid (larger circles count proportionally more)
-    /// so the cluster translation balances visual mass rather than just
-    /// vertex count.
-    private func areaWeightedCentroid(of packed: [PackedCircle]) -> CGPoint {
+    /// Area-weighted centroid using a per-id radius lookup (original, not
+    /// inflated). Larger circles count proportionally more so the cluster
+    /// translation balances visual mass rather than just vertex count.
+    /// Falls back to `c.r` for any id missing from `weights`.
+    private func areaWeightedCentroid(
+        of packed: [PackedCircle],
+        weights: [UUID: CGFloat]
+    ) -> CGPoint {
         guard !packed.isEmpty else { return .zero }
         var totalArea: CGFloat = 0
         var sumX: CGFloat = 0
         var sumY: CGFloat = 0
         for c in packed {
-            let area = c.r * c.r  // π cancels in the weighted average
+            let r = weights[c.id] ?? c.r
+            let area = r * r  // π cancels in the weighted average
             totalArea += area
             sumX += c.x * area
             sumY += c.y * area
