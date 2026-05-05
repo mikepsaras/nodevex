@@ -73,6 +73,13 @@ struct DocumentView: View {
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .opacity(0)
         }
+        .background {
+            Button("Seed Stress Test") {
+                StressTest.seed500Nodes(in: modelContext)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .opacity(0)
+        }
     }
 
     private func runGraphAnalysis() {

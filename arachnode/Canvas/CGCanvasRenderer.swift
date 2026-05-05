@@ -1,7 +1,7 @@
 import AppKit
 import CoreGraphics
 
-struct CGCanvasRenderer: CanvasRenderer {
+final class CGCanvasRenderer: CanvasRenderer {
     let nodeRadius: CGFloat = 7
     let selectedNodeRadius: CGFloat = 8
     let nodeBorderWidth: CGFloat = 1.0
@@ -13,6 +13,19 @@ struct CGCanvasRenderer: CanvasRenderer {
     let arrowSize: CGFloat = 9
     let edgeLineWidth: CGFloat = 1.5
     let arrowsPerAnimatedEdge = 3
+
+    /// Per-(name, selection) label-image cache. Core Text layout +
+    /// `NSAttributedString.draw(...)` is the dominant cost when redrawing the
+    /// canvas at 60 fps with many nodes — this caches a pre-rasterized
+    /// `NSImage` per unique label so subsequent frames just blit a bitmap.
+    /// Entries persist for the lifetime of the renderer; renames produce a
+    /// new key (the old entry becomes orphaned but is bounded by the number
+    /// of names ever used in this session).
+    private struct LabelCacheKey: Hashable {
+        let name: String
+        let isSelected: Bool
+    }
+    private var labelCache: [LabelCacheKey: NSImage] = [:]
 
     func draw(
         in context: CGContext,
@@ -302,6 +315,37 @@ struct CGCanvasRenderer: CanvasRenderer {
         isSelected: Bool,
         extraGap: CGFloat
     ) {
+        let key = LabelCacheKey(name: text, isSelected: isSelected)
+        let image: NSImage
+        if let cached = labelCache[key] {
+            image = cached
+        } else if let new = renderLabelImage(name: text, isSelected: isSelected) {
+            labelCache[key] = new
+            image = new
+        } else {
+            return
+        }
+
+        let size = image.size
+        let labelRect = CGRect(
+            x: point.x - size.width / 2,
+            y: point.y + radius + labelGap + extraGap,
+            width: size.width,
+            height: size.height
+        )
+        // `respectFlipped: true` so the bitmap renders right-side-up in the
+        // CanvasNSView's flipped coordinate system without extra transforms.
+        image.draw(
+            in: labelRect,
+            from: CGRect(origin: .zero, size: size),
+            operation: .sourceOver,
+            fraction: 1.0,
+            respectFlipped: true,
+            hints: nil
+        )
+    }
+
+    private func renderLabelImage(name: String, isSelected: Bool) -> NSImage? {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byTruncatingTail
         paragraphStyle.alignment = .center
@@ -309,23 +353,33 @@ struct CGCanvasRenderer: CanvasRenderer {
         let color = isSelected
             ? NSColor.labelColor
             : NSColor.secondaryLabelColor
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: labelFontSize),
-            .foregroundColor: color,
-            .paragraphStyle: paragraphStyle
-        ]
+        let attributed = NSAttributedString(
+            string: name,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: labelFontSize),
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
 
-        let attributed = NSAttributedString(string: text, attributes: attributes)
         let textSize = attributed.boundingRect(
             with: CGSize(width: labelMaxWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin]
         ).size
-        let labelRect = CGRect(
-            x: point.x - labelMaxWidth / 2,
-            y: point.y + radius + labelGap + extraGap,
-            width: labelMaxWidth,
-            height: textSize.height
+        let size = CGSize(
+            width: ceil(textSize.width),
+            height: ceil(textSize.height)
         )
-        attributed.draw(with: labelRect, options: [.usesLineFragmentOrigin], context: nil)
+        guard size.width > 0, size.height > 0 else { return nil }
+
+        let image = NSImage(size: size)
+        image.lockFocus()
+        attributed.draw(
+            with: CGRect(origin: .zero, size: size),
+            options: [.usesLineFragmentOrigin],
+            context: nil
+        )
+        image.unlockFocus()
+        return image
     }
 }
