@@ -21,22 +21,23 @@ final class CanvasNSView: NSView {
     private let renderer: CanvasRenderer = CGCanvasRenderer()
     private let layoutController = LayoutController()
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
-    private var lastLayoutResult = LayoutResult.empty
+    /// Mutable, in-progress layout. Holds per-cell ripple states that
+    /// advance one tick per animation frame; positions and radii surface
+    /// through it. The previous layout is replaced (not retained) on each
+    /// `runLayout` — but the new one is seeded with the previous frame's
+    /// positions so existing nodes ripple from where they were instead of
+    /// snapping to the packer's reset.
+    private var liveLayout: LiveLayoutState = .empty
     private var positions: [UUID: CGPoint] = [:]
-    /// Per-node display radius. Recomputed on every layout — driven by the
-    /// current `NodeSizingMode` and each node's intrinsic value. Used by the
-    /// renderer for circle/edge geometry and by hit-testing for click target.
+    /// Per-node display radius. Sourced from `liveLayout.radii` on each
+    /// layout run. Used by the renderer for circle/edge geometry and by
+    /// hit-testing for click target.
     private var radii: [UUID: CGFloat] = [:]
+    /// True while any cell's ripple is still active. Drives the animation
+    /// timer alongside edge animation and hover-reveal.
+    private var rippleActive: Bool = false
     private var selectedNodeIDs: Set<UUID> = []
     private var lastGraphSignature: Int?
-
-    /// Snapshot of node positions before the most recent layout run.
-    /// Combined with `transitionStart` and `transitionDuration` to
-    /// interpolate from old positions to new on graph change, so the
-    /// re-layout reads as a smooth slide rather than an abrupt teleport.
-    private var previousPositions: [UUID: CGPoint] = [:]
-    private var transitionStart: Date?
-    private let transitionDuration: TimeInterval = 0.25
 
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
@@ -199,63 +200,33 @@ final class CanvasNSView: NSView {
     }
 
     /// Re-run the layout pipeline against the current graph, sizing, and
-    /// bounds, refreshing cached positions and radii. The renderer reads
-    /// from these caches via `effectivePositions`, which interpolates
-    /// between `previousPositions` and `positions` while a transition is
-    /// active. Radii now come straight from the LayoutResult — the
-    /// controller is the single source of truth.
+    /// bounds. Builds a fresh `LiveLayoutState` (partition + pack +
+    /// initial ripple states) seeded with the previous frame's positions,
+    /// so existing nodes ripple from where they were rather than snapping
+    /// to the packer's reset. The animation timer drives the ripple from
+    /// here on; positions update each frame via `tickLayout`.
     private func runLayout() {
-        let positionsBefore = positions
-        let result = layoutController.computeLayout(
+        liveLayout = layoutController.prepareLayout(
             graph: graph,
             sizing: nodeSizing,
-            bounds: layoutBounds()
+            bounds: layoutBounds(),
+            initialPositions: positions
         )
-        lastLayoutResult = result
-        positions = result.positions
-        radii = result.radii
-        // Trigger a transition only if there was a prior layout to slide
-        // from. First-time layout (empty positionsBefore) snaps into place
-        // without animation.
-        if !positionsBefore.isEmpty {
-            previousPositions = positionsBefore
-            transitionStart = Date()
-        } else {
-            previousPositions = [:]
-            transitionStart = nil
-        }
+        positions = liveLayout.positions
+        radii = liveLayout.radii
+        rippleActive = !liveLayout.rippleStates.isEmpty
     }
 
-    /// 0...1 progress through the active transition, or 1 when idle.
-    private var transitionProgress: CGFloat {
-        guard let start = transitionStart else { return 1 }
-        let elapsed = Date().timeIntervalSince(start)
-        return CGFloat(min(elapsed / transitionDuration, 1.0))
-    }
-
-    /// Position lookup used by both the renderer and hit-testing. During a
-    /// transition, interpolates each node from its previous position toward
-    /// its current position with smoothstep easing. Nodes that didn't exist
-    /// in the previous layout (newly added) appear at their final position
-    /// without animation. Nodes that were removed are silently dropped.
-    private var effectivePositions: [UUID: CGPoint] {
-        let t = transitionProgress
-        guard t < 1.0, !previousPositions.isEmpty else { return positions }
-        // Smoothstep ease-in-out: 3t² − 2t³.
-        let smoothT = t * t * (3 - 2 * t)
-        var result: [UUID: CGPoint] = [:]
-        result.reserveCapacity(positions.count)
-        for (id, current) in positions {
-            if let prev = previousPositions[id] {
-                result[id] = CGPoint(
-                    x: prev.x + (current.x - prev.x) * smoothT,
-                    y: prev.y + (current.y - prev.y) * smoothT
-                )
-            } else {
-                result[id] = current  // New node — appear at final position.
-            }
-        }
-        return result
+    /// Advance the layout's ripple by one frame. Called from the animation
+    /// timer. Returns `true` while any cell is still active; once `false`,
+    /// the timer can stop ticking the ripple (other animations may still
+    /// keep the timer alive).
+    @discardableResult
+    private func tickLayout() -> Bool {
+        let active = layoutController.tick(&liveLayout)
+        positions = liveLayout.positions
+        rippleActive = active
+        return active
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling
@@ -279,8 +250,8 @@ final class CanvasNSView: NSView {
             in: context,
             bounds: bounds,
             graph: graph,
-            positions: effectivePositions,
-            regions: lastLayoutResult.regions,
+            positions: positions,
+            regions: liveLayout.regions,
             radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
@@ -313,11 +284,9 @@ final class CanvasNSView: NSView {
 
     private func updateAnimationTimer() {
         // Timer drives three things: arrow flow on animated edges, hover-
-        // reveal fade transitions, and the layout transition (interpolating
-        // positions on graph change). The deterministic layout itself
-        // doesn't tick — physics is gone.
-        let transitionActive = transitionStart != nil && transitionProgress < 1.0
-        if edgeVisibility == .animated || reveal != nil || transitionActive {
+        // reveal fade transitions, and the per-cell ripple animation
+        // (advances positions one tick per frame until each cell settles).
+        if edgeVisibility == .animated || reveal != nil || rippleActive {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -336,17 +305,14 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
-            // Layout transition completion — once we've crossed the
-            // duration, drop the previous-positions snapshot so subsequent
-            // frames return current positions directly without interpolation.
-            if self.transitionStart != nil, self.transitionProgress >= 1.0 {
-                self.transitionStart = nil
-                self.previousPositions = [:]
+            // Layout ripple — each tick advances every cell's per-node
+            // physics by one step, with positions updating in place.
+            if self.rippleActive {
+                self.tickLayout()
             }
-            let transitionActive = self.transitionStart != nil
             if self.edgeVisibility != .animated
                 && self.reveal == nil
-                && !transitionActive {
+                && !self.rippleActive {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -546,13 +512,12 @@ final class CanvasNSView: NSView {
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
         // Click target = max(actual radius, 12pt floor). The floor keeps tiny
         // value-scaled nodes hittable; large nodes use their actual radius
-        // (no oversized invisible halo). Hit-test uses interpolated positions
-        // during transitions so clicks land on the rendered circle, not the
-        // post-transition target.
-        let positionsForHit = effectivePositions
+        // (no oversized invisible halo). `positions` is the most-current
+        // per-frame snapshot (updated by the ripple tick), so hit-tests
+        // land on the rendered circle even mid-animation.
         let hitFloor: CGFloat = 12
         for node in graph.nodes.reversed() {
-            guard let pos = positionsForHit[node.id] else { continue }
+            guard let pos = positions[node.id] else { continue }
             let hitRadius = max(radii[node.id] ?? NodeSizingMode.defaultRadius, hitFloor)
             let dx = canvasPoint.x - pos.x
             let dy = canvasPoint.y - pos.y
