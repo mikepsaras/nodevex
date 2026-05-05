@@ -139,4 +139,53 @@ struct Region: Equatable {
         let dx = p.x - projX, dy = p.y - projY
         return sqrt(dx * dx + dy * dy)
     }
+
+    /// Project `point` so it sits at least `inset` away from every edge of
+    /// the polygon. For a convex polygon (Voronoi cells always are), this
+    /// is equivalent to clamping `point` into the polygon eroded by
+    /// `inset`. Useful for drag interactions where a circle of radius `r`
+    /// must stay fully inside the cell — pass `inset: r`.
+    ///
+    /// Iterative: each pass pushes the result inward from any edge it
+    /// violates; multiple passes converge for corners where two adjacent
+    /// edges are violated at once. Caps at a few passes to bound work
+    /// even on degenerate input.
+    func clampedToInset(_ point: CGPoint, by inset: CGFloat) -> CGPoint {
+        guard polygon.count >= 3 else { return point }
+        let centroid = self.centroid
+        var result = point
+
+        for _ in 0..<6 {
+            var moved = false
+            for i in 0..<polygon.count {
+                let p1 = polygon[i]
+                let p2 = polygon[(i + 1) % polygon.count]
+                let edgeX = p2.x - p1.x
+                let edgeY = p2.y - p1.y
+                let edgeLenSq = edgeX * edgeX + edgeY * edgeY
+                if edgeLenSq < 1e-9 { continue }
+                let edgeLen = sqrt(edgeLenSq)
+                // Inward normal: pick the perpendicular that points toward
+                // the centroid (which is always inside a convex polygon).
+                var nx = -edgeY / edgeLen
+                var ny = edgeX / edgeLen
+                let midX = (p1.x + p2.x) / 2
+                let midY = (p1.y + p2.y) / 2
+                if nx * (centroid.x - midX) + ny * (centroid.y - midY) < 0 {
+                    nx = -nx
+                    ny = -ny
+                }
+                // Signed inward distance from the result to this edge.
+                let dist = nx * (result.x - p1.x) + ny * (result.y - p1.y)
+                if dist < inset {
+                    let push = inset - dist
+                    result.x += nx * push
+                    result.y += ny * push
+                    moved = true
+                }
+            }
+            if !moved { break }
+        }
+        return result
+    }
 }

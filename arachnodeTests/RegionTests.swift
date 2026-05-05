@@ -133,4 +133,63 @@ struct RegionTests {
         #expect(twoPoints.area == 0)
         #expect(!twoPoints.contains(CGPoint(x: 0.5, y: 0.5)))
     }
+
+    @Test("clampedToInset: point already comfortably inside is unchanged")
+    func clampInsetUnchanged() {
+        let big = Region(polygon: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 100, y: 0),
+            CGPoint(x: 100, y: 100),
+            CGPoint(x: 0, y: 100)
+        ])
+        let inside = CGPoint(x: 50, y: 50)
+        let result = big.clampedToInset(inside, by: 5)
+        #expect(abs(result.x - inside.x) < 1e-6)
+        #expect(abs(result.y - inside.y) < 1e-6)
+    }
+
+    @Test("clampedToInset: point outside polygon is projected inward")
+    func clampInsetOutside() {
+        let big = Region(polygon: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 100, y: 0),
+            CGPoint(x: 100, y: 100),
+            CGPoint(x: 0, y: 100)
+        ])
+        // 50 units beyond the right edge — should land on the inset
+        // boundary (x = 100 − 5 = 95).
+        let result = big.clampedToInset(CGPoint(x: 150, y: 50), by: 5)
+        #expect(abs(result.x - 95) < 1e-6)
+        #expect(abs(result.y - 50) < 1e-6)
+    }
+
+    @Test("clampedToInset: point near an edge is pushed to the inset distance")
+    func clampInsetNearEdge() {
+        let big = Region(polygon: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 100, y: 0),
+            CGPoint(x: 100, y: 100),
+            CGPoint(x: 0, y: 100)
+        ])
+        // 2 units from the bottom edge, with inset 10 → should be pushed
+        // to y = 10.
+        let result = big.clampedToInset(CGPoint(x: 50, y: 2), by: 10)
+        #expect(abs(result.x - 50) < 1e-6)
+        #expect(abs(result.y - 10) < 1e-6)
+    }
+
+    @Test("clampedToInset: corner case projects toward the polygon interior")
+    func clampInsetCorner() {
+        let big = Region(polygon: [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 100, y: 0),
+            CGPoint(x: 100, y: 100),
+            CGPoint(x: 0, y: 100)
+        ])
+        // Point well outside the bottom-left corner. Both bottom and left
+        // edges are violated; result should be the inset corner (10, 10).
+        let result = big.clampedToInset(CGPoint(x: -50, y: -50), by: 10)
+        #expect(abs(result.x - 10) < 1e-6)
+        #expect(abs(result.y - 10) < 1e-6)
+    }
 }
