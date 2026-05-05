@@ -67,8 +67,25 @@ final class CanvasNSView: NSView {
     private var lastModalFocusedNodeID: UUID?
 
     /// Node hit on mouseDown. Consumed on mouseUp to fire `onNodeFocus`
-    /// for plain clicks (no modifiers).
+    /// for plain clicks (no modifiers). Cleared the moment a drag is
+    /// engaged so the click→focus path doesn't fire on drag-release.
     private var pendingClickNodeID: UUID?
+
+    /// Drag bookkeeping. The cursor's canvas point at mouseDown, the
+    /// dragged node's CategoryKey + radius captured then, and a flag for
+    /// whether motion has crossed the click→drag threshold. The dragged
+    /// node's position is pinned in its cell's ripple state during the
+    /// drag (via `fixedIndex`); neighbors continue rippling around it.
+    private struct DragState {
+        let nodeID: UUID
+        let cellKey: CategoryKey
+        let nodeRadius: CGFloat
+        let downCanvasPoint: CGPoint
+        let originalNodePosition: CGPoint
+        var didCrossThreshold: Bool
+    }
+    private var dragState: DragState?
+    private let dragThreshold: CGFloat = 3
 
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -371,13 +388,30 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
-        // Plain click on a node opens the focus modal (consumed in mouseUp).
-        // Selection requires shift (add) or command (toggle). Click on empty
-        // canvas without a modifier clears the selection. Drag is no longer
-        // a gesture — the deterministic layout doesn't accept manual
-        // perturbation, so there's no DragState bookkeeping to maintain.
         pendingClickNodeID = hitID
+        // Capture drag state if we hit a node — actual drag engagement
+        // requires crossing the threshold in mouseDragged. The CategoryKey
+        // tells us which cell's ripple state to update during the drag.
+        if let hitID,
+           let pos = positions[hitID],
+           let radius = radii[hitID],
+           let node = graph.nodes.first(where: { $0.id == hitID }) {
+            let cellKey = CategoryKey.from(categoryIDs: node.categories.map { $0.id })
+            dragState = DragState(
+                nodeID: hitID,
+                cellKey: cellKey,
+                nodeRadius: radius,
+                downCanvasPoint: canvasPoint,
+                originalNodePosition: pos,
+                didCrossThreshold: false
+            )
+        } else {
+            dragState = nil
+        }
 
+        // Plain click opens the focus modal (consumed in mouseUp).
+        // Selection requires shift (add) or command (toggle). Click on
+        // empty canvas without a modifier clears the selection.
         var newSelection = selectedNodeIDs
         if let hitID {
             if modifiers.contains(.shift) {
@@ -399,8 +433,82 @@ final class CanvasNSView: NSView {
         onSelectionChange?(newSelection)
     }
 
+    override func mouseDragged(with event: NSEvent) {
+        guard var state = dragState else { return }
+
+        let pointInView = convert(event.locationInWindow, from: nil)
+        let canvasPoint = CGPoint(
+            x: pointInView.x - bounds.midX,
+            y: pointInView.y - bounds.midY
+        )
+        let dx = canvasPoint.x - state.downCanvasPoint.x
+        let dy = canvasPoint.y - state.downCanvasPoint.y
+
+        // Engagement: only commit to drag once the cursor has moved past
+        // the threshold. Below threshold we treat it as a still-pending
+        // click so a slightly-jittery click doesn't accidentally drag.
+        if !state.didCrossThreshold,
+           (dx * dx + dy * dy) > dragThreshold * dragThreshold {
+            state.didCrossThreshold = true
+            // Drag commits — abandon the click→focus path and suppress
+            // hover during the gesture.
+            pendingClickNodeID = nil
+            updateHover(target: nil)
+        }
+
+        if state.didCrossThreshold {
+            let target = CGPoint(
+                x: state.originalNodePosition.x + dx,
+                y: state.originalNodePosition.y + dy
+            )
+            // Clamp to the cell's polygon, inset by the node's radius so
+            // the entire circle stays inside its cell. Voronoi cells are
+            // convex, so a single iterative clamp converges quickly.
+            if let region = liveLayout.regions[state.cellKey] {
+                let clamped = region.clampedToInset(target, by: state.nodeRadius)
+                // Update the ripple state for this cell: pin the dragged
+                // node at the clamped position so neighbors repel from it
+                // each tick. We also bump alpha if it had decayed to zero
+                // so the ripple resumes ticking around the dragged node.
+                if var cellState = liveLayout.rippleStates[state.cellKey],
+                   let nodeIndex = cellState.ids.firstIndex(of: state.nodeID) {
+                    cellState.positions[nodeIndex] = clamped
+                    cellState.velocities[nodeIndex] = .zero
+                    cellState.fixedIndex = nodeIndex
+                    if cellState.alpha < 0.5 { cellState.alpha = 0.5 }
+                    liveLayout.rippleStates[state.cellKey] = cellState
+                }
+                positions[state.nodeID] = clamped
+                rippleActive = true
+                updateAnimationTimer()
+                needsDisplay = true
+            }
+        }
+
+        dragState = state
+    }
+
     override func mouseUp(with event: NSEvent) {
-        defer { pendingClickNodeID = nil }
+        defer {
+            dragState = nil
+            pendingClickNodeID = nil
+        }
+
+        // Drag end — release the pin and bump alpha so neighbors continue
+        // rippling for a moment after release (settling around the dropped
+        // node's new spot). Skip the click→focus path entirely.
+        if let state = dragState, state.didCrossThreshold {
+            if var cellState = liveLayout.rippleStates[state.cellKey] {
+                cellState.fixedIndex = nil
+                if cellState.alpha < 0.5 { cellState.alpha = 0.5 }
+                liveLayout.rippleStates[state.cellKey] = cellState
+                rippleActive = true
+                updateAnimationTimer()
+            }
+            return
+        }
+
+        // Plain click — fire focus modal.
         guard let nodeID = pendingClickNodeID else { return }
         let modifiers = event.modifierFlags
         if modifiers.isDisjoint(with: [.shift, .command, .option]) {
@@ -409,6 +517,11 @@ final class CanvasNSView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // Suppress hover entirely while a drag gesture is engaged.
+        if dragState?.didCrossThreshold == true {
+            updateHover(target: nil)
+            return
+        }
         let pointInView = convert(event.locationInWindow, from: nil)
         let canvasPoint = CGPoint(
             x: pointInView.x - bounds.midX,
