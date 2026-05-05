@@ -147,7 +147,16 @@ struct ForceDirectedLayout {
     /// Establish initial positions for any node that doesn't already have one.
     /// Existing positions are preserved (so a graph addition doesn't scramble
     /// the layout). New nodes spawn around `seedOrigin` (canvas-center coords)
-    /// so they land where the user is currently looking.
+    /// so they land where the user is currently looking — except categorized
+    /// nodes, which are offset toward a deterministic per-category anchor so
+    /// same-category siblings start visibly clustered rather than emerging
+    /// over several seconds of clustering-force pull.
+    ///
+    /// The anchor for a category is derived from `category.id.hashValue`, so
+    /// each category lands in a stable direction around `seedOrigin` across
+    /// runs, with `clusterSeparation` controlling how far apart category
+    /// clusters spawn.
+    ///
     /// Called by `LayoutEngine` on graph change.
     func seedPositions(
         graph: GraphSnapshot,
@@ -159,13 +168,28 @@ struct ForceDirectedLayout {
         for (id, pos) in previousPositions where knownIDs.contains(id) {
             positions[id] = pos
         }
+        let clusterSeparation: CGFloat = 200
         for node in graph.nodes where positions[node.id] == nil {
-            let hash = abs(node.id.hashValue)
-            let angle = CGFloat(hash % 1000) / 1000.0 * 2 * .pi
-            let radius = CGFloat(20 + (hash % 60))
+            let anchor: CGPoint
+            if let firstCategoryID = node.categories.first?.id {
+                let catHash = abs(firstCategoryID.hashValue)
+                let catAngle = CGFloat(catHash % 1000) / 1000.0 * 2 * .pi
+                anchor = CGPoint(
+                    x: seedOrigin.x + cos(catAngle) * clusterSeparation,
+                    y: seedOrigin.y + sin(catAngle) * clusterSeparation
+                )
+            } else {
+                anchor = seedOrigin
+            }
+            // Per-node jitter so two same-category siblings don't pile on
+            // exactly the same point (which the quadtree would have to
+            // collapse into a multi-body leaf).
+            let nodeHash = abs(node.id.hashValue)
+            let angle = CGFloat(nodeHash % 1000) / 1000.0 * 2 * .pi
+            let radius = CGFloat(20 + (nodeHash % 60))
             positions[node.id] = CGPoint(
-                x: seedOrigin.x + cos(angle) * radius,
-                y: seedOrigin.y + sin(angle) * radius
+                x: anchor.x + cos(angle) * radius,
+                y: anchor.y + sin(angle) * radius
             )
         }
         return positions
