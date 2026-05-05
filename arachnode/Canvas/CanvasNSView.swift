@@ -22,10 +22,15 @@ final class CanvasNSView: NSView {
     private let layoutEngine = LayoutEngine()
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
     private var positions: [UUID: CGPoint] = [:]
+    /// Per-node display radius. Recomputed on every update() — driven by the
+    /// current `NodeSizingMode` and each node's intrinsic value. Used by the
+    /// renderer for circle/edge geometry and by hit-testing for click target.
+    private var radii: [UUID: CGFloat] = [:]
     private var selectedNodeIDs: Set<UUID> = []
     private var lastGraphSignature: Int?
 
     private var edgeVisibility: EdgeVisibilityMode = .animated
+    private var nodeSizing: NodeSizingMode = .fixed
     private var appearanceMode: AppearanceMode = .dim
     private var lastResetLayoutVersion: Int = 0
     private var animationPhase: CGFloat = 0
@@ -78,6 +83,7 @@ final class CanvasNSView: NSView {
         selectedNodeIDs: Set<UUID>,
         modalFocusedNodeID: UUID?,
         edgeVisibility: EdgeVisibilityMode,
+        nodeSizing: NodeSizingMode,
         appearanceMode: AppearanceMode,
         resetLayoutVersion: Int
     ) {
@@ -99,7 +105,11 @@ final class CanvasNSView: NSView {
             self.selectedNodeIDs = selectedNodeIDs
         }
         self.edgeVisibility = edgeVisibility
+        self.nodeSizing = nodeSizing
         self.appearanceMode = appearanceMode
+        // Recompute every update — value and sizing-mode changes don't shift
+        // graphSignature, so the renderer needs a fresh map each time.
+        self.radii = computeRadii(graph: graph, sizing: nodeSizing)
 
         if modalFocusedNodeID != lastModalFocusedNodeID {
             handleModalFocusChange(from: lastModalFocusedNodeID, to: modalFocusedNodeID)
@@ -178,6 +188,7 @@ final class CanvasNSView: NSView {
             bounds: bounds,
             graph: graph,
             positions: positions,
+            radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
             revealedNodeID: reveal?.nodeID,
@@ -513,17 +524,29 @@ final class CanvasNSView: NSView {
     }
 
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
-        let hitRadius: CGFloat = 16
-        let hitRadiusSquared = hitRadius * hitRadius
+        // Click target = max(actual radius, 12pt floor). The floor keeps tiny
+        // value-scaled nodes hittable; large nodes use their actual radius
+        // (no oversized invisible halo).
+        let hitFloor: CGFloat = 12
         for node in graph.nodes.reversed() {
             guard let pos = positions[node.id] else { continue }
+            let hitRadius = max(radii[node.id] ?? NodeSizingMode.defaultRadius, hitFloor)
             let dx = canvasPoint.x - pos.x
             let dy = canvasPoint.y - pos.y
-            if dx * dx + dy * dy <= hitRadiusSquared {
+            if dx * dx + dy * dy <= hitRadius * hitRadius {
                 return node.id
             }
         }
         return nil
+    }
+
+    private func computeRadii(graph: GraphSnapshot, sizing: NodeSizingMode) -> [UUID: CGFloat] {
+        var result: [UUID: CGFloat] = [:]
+        result.reserveCapacity(graph.nodes.count)
+        for node in graph.nodes {
+            result[node.id] = sizing.radius(forValue: node.value)
+        }
+        return result
     }
 
     private func graphSignature(_ graph: GraphSnapshot) -> Int {

@@ -11,6 +11,7 @@ struct DocumentView: View {
     @State private var selectedNodeIDs: Set<UUID> = []
     @State private var focusedNodeID: UUID?
     @State private var edgeVisibility: EdgeVisibilityMode = .hidden
+    @State private var nodeSizing: NodeSizingMode = .fixed
     @State private var resetLayoutVersion = 0
 
     private var focusedNode: Node? {
@@ -39,6 +40,7 @@ struct DocumentView: View {
             CanvasView(
                 selectedNodeIDs: $selectedNodeIDs,
                 edgeVisibility: edgeVisibility,
+                nodeSizing: nodeSizing,
                 modalFocusedNodeID: focusedNodeID,
                 onNodeFocus: { focusedNodeID = $0 },
                 appearanceMode: appearanceMode,
@@ -47,6 +49,7 @@ struct DocumentView: View {
             .overlay(alignment: .bottomLeading) {
                 CanvasFooter(
                     edgeVisibility: $edgeVisibility,
+                    nodeSizing: $nodeSizing,
                     onResetLayout: { resetLayoutVersion += 1 }
                 )
                 .padding(12)

@@ -5,6 +5,7 @@ import AppKit
 struct CanvasView: NSViewRepresentable {
     @Binding var selectedNodeIDs: Set<UUID>
     var edgeVisibility: EdgeVisibilityMode
+    var nodeSizing: NodeSizingMode
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
     var appearanceMode: AppearanceMode
@@ -54,6 +55,7 @@ struct CanvasView: NSViewRepresentable {
             selectedNodeIDs: selectedNodeIDs,
             modalFocusedNodeID: modalFocusedNodeID,
             edgeVisibility: edgeVisibility,
+            nodeSizing: nodeSizing,
             appearanceMode: appearanceMode,
             resetLayoutVersion: resetLayoutVersion
         )

@@ -7,6 +7,7 @@ protocol CanvasRenderer {
         bounds: CGRect,
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
+        radii: [UUID: CGFloat],
         selectedIDs: Set<UUID>,
         highlightedNodeID: UUID?,
         revealedNodeID: UUID?,

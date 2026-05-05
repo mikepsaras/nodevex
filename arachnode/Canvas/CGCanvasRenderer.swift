@@ -2,8 +2,9 @@ import AppKit
 import CoreGraphics
 
 final class CGCanvasRenderer: CanvasRenderer {
-    let nodeRadius: CGFloat = 7
-    let selectedNodeRadius: CGFloat = 8
+    /// +1pt over the node's base radius. Additive (rather than ratio) so the
+    /// selection cue reads consistently across fixed and value-scaled sizes.
+    let selectedRadiusBump: CGFloat = 1
     let nodeBorderWidth: CGFloat = 1.0
     let labelGap: CGFloat = 6
     let labelFontSize: CGFloat = 11
@@ -32,6 +33,7 @@ final class CGCanvasRenderer: CanvasRenderer {
         bounds: CGRect,
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
+        radii: [UUID: CGFloat],
         selectedIDs: Set<UUID>,
         highlightedNodeID: UUID?,
         revealedNodeID: UUID?,
@@ -76,10 +78,14 @@ final class CGCanvasRenderer: CanvasRenderer {
                   let targetPos = positions[edge.targetID] else { continue }
             let canvasSource = CGPoint(x: center.x + sourcePos.x, y: center.y + sourcePos.y)
             let canvasTarget = CGPoint(x: center.x + targetPos.x, y: center.y + targetPos.y)
+            let sourceRadius = radii[edge.sourceID] ?? NodeSizingMode.defaultRadius
+            let targetRadius = radii[edge.targetID] ?? NodeSizingMode.defaultRadius
             drawEdge(
                 edge,
                 from: canvasSource,
                 to: canvasTarget,
+                sourceRadius: sourceRadius,
+                targetRadius: targetRadius,
                 visibility: effectiveVisibility,
                 opacityScale: opacityScale,
                 animationPhase: animationPhase,
@@ -90,9 +96,11 @@ final class CGCanvasRenderer: CanvasRenderer {
         for node in graph.nodes {
             guard let pos = positions[node.id] else { continue }
             let canvasPos = CGPoint(x: center.x + pos.x, y: center.y + pos.y)
+            let baseRadius = radii[node.id] ?? NodeSizingMode.defaultRadius
             drawNode(
                 node,
                 at: canvasPos,
+                baseRadius: baseRadius,
                 isSelected: selectedIDs.contains(node.id),
                 isHighlighted: highlightedNodeID == node.id,
                 showLabel: zoom >= 0.5,
@@ -105,6 +113,8 @@ final class CGCanvasRenderer: CanvasRenderer {
         _ edge: Edge,
         from sourcePos: CGPoint,
         to targetPos: CGPoint,
+        sourceRadius: CGFloat,
+        targetRadius: CGFloat,
         visibility: EdgeVisibilityMode,
         opacityScale: CGFloat,
         animationPhase: CGFloat,
@@ -112,19 +122,19 @@ final class CGCanvasRenderer: CanvasRenderer {
     ) {
         if edge.sourceID == edge.targetID {
             let color = edgeColor(for: edge.valence).withAlphaComponent(opacityScale)
-            drawSelfLoop(at: sourcePos, color: color, in: context)
+            drawSelfLoop(at: sourcePos, nodeRadius: sourceRadius, color: color, in: context)
             return
         }
 
         let dx = targetPos.x - sourcePos.x
         let dy = targetPos.y - sourcePos.y
         let distance = sqrt(dx * dx + dy * dy)
-        guard distance > nodeRadius * 2 + edgeGap * 2 + arrowSize else { return }
+        guard distance > sourceRadius + targetRadius + edgeGap * 2 + arrowSize else { return }
         let unitX = dx / distance
         let unitY = dy / distance
 
-        let startInset = nodeRadius + edgeGap
-        let endInset = nodeRadius + edgeGap
+        let startInset = sourceRadius + edgeGap
+        let endInset = targetRadius + edgeGap
         let lineStart = CGPoint(
             x: sourcePos.x + unitX * startInset,
             y: sourcePos.y + unitY * startInset
@@ -205,7 +215,7 @@ final class CGCanvasRenderer: CanvasRenderer {
     /// Self-loop rendering: a small stroked circle sitting on top of the
     /// node. Visibility mode is ignored — animated arrowheads on a tiny
     /// closed loop don't read well, so we keep it static regardless.
-    private func drawSelfLoop(at point: CGPoint, color: NSColor, in context: CGContext) {
+    private func drawSelfLoop(at point: CGPoint, nodeRadius: CGFloat, color: NSColor, in context: CGContext) {
         let loopRadius: CGFloat = 8
         // isFlipped: true ⇒ smaller y is visually higher.
         let loopCenter = CGPoint(x: point.x, y: point.y - nodeRadius - loopRadius)
@@ -262,12 +272,13 @@ final class CGCanvasRenderer: CanvasRenderer {
     private func drawNode(
         _ node: Node,
         at point: CGPoint,
+        baseRadius: CGFloat,
         isSelected: Bool,
         isHighlighted: Bool,
         showLabel: Bool,
         in context: CGContext
     ) {
-        let radius = isSelected ? selectedNodeRadius : nodeRadius
+        let radius = isSelected ? baseRadius + selectedRadiusBump : baseRadius
         let circleRect = CGRect(
             x: point.x - radius,
             y: point.y - radius,
