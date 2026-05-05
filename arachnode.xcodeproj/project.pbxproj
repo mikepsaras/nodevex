@@ -12,24 +12,24 @@
 			containerPortal = 27AA6C982FA77CF300AED932 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 27AA6C9F2FA77CF300AED932;
-			remoteInfo = nodevex;
+			remoteInfo = arachnode;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		277AABED2FA8D57400878909 /* nodevexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = nodevexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		27AA6CA02FA77CF300AED932 /* nodevex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = nodevex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		277AABED2FA8D57400878909 /* arachnodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = arachnodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		27AA6CA02FA77CF300AED932 /* arachnode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = arachnode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		277AABEE2FA8D57400878909 /* nodevexTests */ = {
+		277AABEE2FA8D57400878909 /* arachnodeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = nodevexTests;
+			path = arachnodeTests;
 			sourceTree = "<group>";
 		};
-		27AA6CA22FA77CF300AED932 /* nodevex */ = {
+		27AA6CA22FA77CF300AED932 /* arachnode */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = nodevex;
+			path = arachnode;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -55,8 +55,8 @@
 		27AA6C972FA77CF300AED932 = {
 			isa = PBXGroup;
 			children = (
-				27AA6CA22FA77CF300AED932 /* nodevex */,
-				277AABEE2FA8D57400878909 /* nodevexTests */,
+				27AA6CA22FA77CF300AED932 /* arachnode */,
+				277AABEE2FA8D57400878909 /* arachnodeTests */,
 				27AA6CA12FA77CF300AED932 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -64,8 +64,8 @@
 		27AA6CA12FA77CF300AED932 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				27AA6CA02FA77CF300AED932 /* nodevex.app */,
-				277AABED2FA8D57400878909 /* nodevexTests.xctest */,
+				27AA6CA02FA77CF300AED932 /* arachnode.app */,
+				277AABED2FA8D57400878909 /* arachnodeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -73,9 +73,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		277AABEC2FA8D57400878909 /* nodevexTests */ = {
+		277AABEC2FA8D57400878909 /* arachnodeTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "nodevexTests" */;
+			buildConfigurationList = 277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "arachnodeTests" */;
 			buildPhases = (
 				277AABE92FA8D57400878909 /* Sources */,
 				277AABEA2FA8D57400878909 /* Frameworks */,
@@ -87,18 +87,18 @@
 				277AABF22FA8D57400878909 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				277AABEE2FA8D57400878909 /* nodevexTests */,
+				277AABEE2FA8D57400878909 /* arachnodeTests */,
 			);
-			name = nodevexTests;
+			name = arachnodeTests;
 			packageProductDependencies = (
 			);
-			productName = nodevexTests;
-			productReference = 277AABED2FA8D57400878909 /* nodevexTests.xctest */;
+			productName = arachnodeTests;
+			productReference = 277AABED2FA8D57400878909 /* arachnodeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		27AA6C9F2FA77CF300AED932 /* nodevex */ = {
+		27AA6C9F2FA77CF300AED932 /* arachnode */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 27AA6CAB2FA77CF400AED932 /* Build configuration list for PBXNativeTarget "nodevex" */;
+			buildConfigurationList = 27AA6CAB2FA77CF400AED932 /* Build configuration list for PBXNativeTarget "arachnode" */;
 			buildPhases = (
 				27AA6C9C2FA77CF300AED932 /* Sources */,
 				27AA6C9D2FA77CF300AED932 /* Frameworks */,
@@ -109,13 +109,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				27AA6CA22FA77CF300AED932 /* nodevex */,
+				27AA6CA22FA77CF300AED932 /* arachnode */,
 			);
-			name = nodevex;
+			name = arachnode;
 			packageProductDependencies = (
 			);
-			productName = nodevex;
-			productReference = 27AA6CA02FA77CF300AED932 /* nodevex.app */;
+			productName = arachnode;
+			productReference = 27AA6CA02FA77CF300AED932 /* arachnode.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -137,7 +137,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 27AA6C9B2FA77CF300AED932 /* Build configuration list for PBXProject "nodevex" */;
+			buildConfigurationList = 27AA6C9B2FA77CF300AED932 /* Build configuration list for PBXProject "arachnode" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -151,8 +151,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				27AA6C9F2FA77CF300AED932 /* nodevex */,
-				277AABEC2FA8D57400878909 /* nodevexTests */,
+				27AA6C9F2FA77CF300AED932 /* arachnode */,
+				277AABEC2FA8D57400878909 /* arachnodeTests */,
 			);
 		};
 /* End PBXProject section */
@@ -194,7 +194,7 @@
 /* Begin PBXTargetDependency section */
 		277AABF22FA8D57400878909 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 27AA6C9F2FA77CF300AED932 /* nodevex */;
+			target = 27AA6C9F2FA77CF300AED932 /* arachnode */;
 			targetProxy = 277AABF12FA8D57400878909 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -209,14 +209,14 @@
 				DEVELOPMENT_TEAM = KCWY4Y9L53;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevexTests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.arachnodeTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nodevex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nodevex";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/arachnode.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/arachnode";
 			};
 			name = Debug;
 		};
@@ -229,14 +229,14 @@
 				DEVELOPMENT_TEAM = KCWY4Y9L53;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevexTests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.arachnodeTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nodevex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nodevex";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/arachnode.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/arachnode";
 			};
 			name = Release;
 		};
@@ -380,7 +380,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevex;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.arachnode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -412,7 +412,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = services.serta.nodevex;
+				PRODUCT_BUNDLE_IDENTIFIER = services.serta.arachnode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -427,7 +427,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "nodevexTests" */ = {
+		277AABF52FA8D57400878909 /* Build configuration list for PBXNativeTarget "arachnodeTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				277AABF32FA8D57400878909 /* Debug */,
@@ -436,7 +436,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		27AA6C9B2FA77CF300AED932 /* Build configuration list for PBXProject "nodevex" */ = {
+		27AA6C9B2FA77CF300AED932 /* Build configuration list for PBXProject "arachnode" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				27AA6CA92FA77CF400AED932 /* Debug */,
@@ -445,7 +445,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		27AA6CAB2FA77CF400AED932 /* Build configuration list for PBXNativeTarget "nodevex" */ = {
+		27AA6CAB2FA77CF400AED932 /* Build configuration list for PBXNativeTarget "arachnode" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				27AA6CAC2FA77CF400AED932 /* Debug */,

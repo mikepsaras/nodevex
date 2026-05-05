@@ -1,6 +1,6 @@
 import Testing
 import CoreGraphics
-@testable import nodevex
+@testable import arachnode
 
 @Suite("LayoutEngine")
 struct LayoutEngineTests {

@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 @main
-struct NodeVexApp: App {
+struct ArachnodeApp: App {
     @State private var terminologyStore = TerminologyStore()
 
     var body: some Scene {

@@ -1,5 +1,5 @@
 import Testing
-@testable import nodevex
+@testable import arachnode
 
 @Suite("ShortestPath")
 struct ShortestPathTests {
