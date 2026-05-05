@@ -6,13 +6,16 @@ import CoreGraphics
 /// changes. This is the perturb-and-restore model: continuous physics, alpha
 /// decays each tick toward 0, drag perturbs alpha back to 1.0.
 ///
-/// Forces (Fruchterman-Reingold variant):
-/// - Inverse-square repulsion between all node pairs
+/// Per-tick forces (folded into the displacement vector and clamped together
+/// at integration):
+/// - Inverse-square repulsion between all node pairs (Barnes–Hut)
 /// - Edge springs (attraction proportional to distance²)
-/// - Category clustering (Hooke-style attraction between same-category nodes)
-/// - Gentle gravity toward the world origin (the only recentering force —
-///   the canvas is effectively infinite, so the graph self-centers via gravity
-///   rather than any hard clamp)
+/// - Gravity toward the world origin — for **uncategorized nodes only**
+///
+/// Plus a post-integration step that bypasses the force-clamp budget:
+/// - Categorized nodes are position-blended toward their category's fixed
+///   anchor slot on a ring around the origin (Democracy-4-style ministry
+///   zones — see `categoryAnchorStrength` / `anchorRadius`).
 struct ForceDirectedLayout {
     private let repulsionConstant: CGFloat = 1_800_000
     private let minRepulsionDistance: CGFloat = 25
@@ -21,20 +24,48 @@ struct ForceDirectedLayout {
     /// Barnes–Hut accuracy parameter. 0 = exact (full O(n²) sum), higher =
     /// faster but coarser. d3-force defaults to 0.9; we match it.
     private let barnesHutTheta: CGFloat = 0.9
-    /// Per-tick blend rate (0…1) toward each owned category's centroid,
-    /// applied as a position lerp **after** force integration so it doesn't
-    /// share the `maxForcePerTick` clamp budget with edges and repulsion.
-    /// That's the structural difference vs. a force term: even when a node
-    /// has many cross-category edges yanking it sideways (the random-edge
-    /// stress test is the worst case), category cohesion still wins because
-    /// the blend is unconditional. Scaled by alpha so it dies along with
-    /// the rest of the simulation when the graph settles. Multi-category
-    /// nodes blend toward the average of their owned centroids, which is
-    /// what positions shared nodes on the boundary between groups. Raise
-    /// for tighter zones / faster cohesion, lower for looser.
-    private let categoryAnchorStrength: CGFloat = 0.04
+    /// Per-tick blend rate (0…1) toward each owned category's **fixed**
+    /// anchor (not its floating centroid), applied as a position lerp after
+    /// force integration so it doesn't share the `maxForcePerTick` clamp
+    /// budget with edges and repulsion. The fixed-anchor target is what
+    /// gives Democracy-4-style stationary regions: edges can yank a node
+    /// sideways within their clamped share, but the next tick the blend
+    /// reels it back to its category's slot — and that slot doesn't drift,
+    /// so the cluster as a whole stays put. (Earlier iterations targeted the
+    /// floating centroid, which itself got dragged inward by central gravity
+    /// + cross-category edges, producing crescents.) Scaled by alpha so the
+    /// blend dies along with the rest of the simulation. Multi-category
+    /// nodes blend toward the average of their owned anchors.
+    private let categoryAnchorStrength: CGFloat = 0.15
+    /// Radius of the per-category anchor ring around the world origin. Each
+    /// category gets a fixed slot at angle `index × 2π / count`, with index
+    /// determined by sorted UUID for stability. 600pt leaves comfortable
+    /// gaps between slots at typical 8-category counts (≈460pt slot
+    /// separation) — wide enough that ~80pt cluster radii don't overlap.
+    private let anchorRadius: CGFloat = 600
     private let velocityDecay: CGFloat = 0.4
     private let maxForcePerTick: CGFloat = 4
+
+    /// Build the per-category anchor map. Categories are sorted by UUID so
+    /// the slot mapping is stable across runs. Used by both `advance` (the
+    /// blend target) and `seedPositions` (initial placement) — a node
+    /// spawns at its anchor and gets blended back if forces perturb it.
+    private func anchorPositions(for categories: [Category]) -> [UUID: CGPoint] {
+        var result: [UUID: CGPoint] = [:]
+        let sortedIDs = categories.map { $0.id }
+            .sorted(by: { $0.uuidString < $1.uuidString })
+        guard !sortedIDs.isEmpty else { return result }
+        result.reserveCapacity(sortedIDs.count)
+        let slotStep = (2 * .pi) / CGFloat(sortedIDs.count)
+        for (index, id) in sortedIDs.enumerated() {
+            let angle = CGFloat(index) * slotStep
+            result[id] = CGPoint(
+                x: cos(angle) * anchorRadius,
+                y: sin(angle) * anchorRadius
+            )
+        }
+        return result
+    }
 
     /// One physics tick. Computes forces (Fruchterman-Reingold), accumulates
     /// them into per-node velocities (with friction), and integrates position
@@ -43,13 +74,13 @@ struct ForceDirectedLayout {
     ///
     /// Implementation note: positions/velocities/displacements are hoisted
     /// into ordinal-indexed arrays for the duration of the tick. Repulsion
-    /// is O(n log n) via Barnes–Hut and category anchoring is O(n) via
-    /// centroid accumulation, so the per-tick budget is dominated by the
-    /// integration sweep — but the hot Barnes–Hut walk still does on the
-    /// order of `n × log n` position reads per tick. A `[UUID: CGPoint]`
-    /// lookup costs ~50 ns; an indexed array load is a couple of ns. At
-    /// 500-node stress-test scale that's the difference between butter-
-    /// smooth and stutter, so the array hoisting stays.
+    /// is O(n log n) via Barnes–Hut and the anchor-blend pass is O(n), so
+    /// the per-tick budget is dominated by the integration sweep — but the
+    /// hot Barnes–Hut walk still does on the order of `n × log n` position
+    /// reads per tick. A `[UUID: CGPoint]` lookup costs ~50 ns; an indexed
+    /// array load is a couple of ns. At 500-node stress-test scale that's
+    /// the difference between butter-smooth and stutter, so the array
+    /// hoisting stays.
     func advance(
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
@@ -128,32 +159,17 @@ struct ForceDirectedLayout {
             disp[v].y += unitY * force
         }
 
-        // Category centroids — accumulate sums in one O(n) pass, then derive
-        // each centroid by division. The pulls themselves are applied AFTER
-        // integration, as a position blend (see below) — that's what lets
-        // category cohesion hold under heavy cross-category edge load
-        // without arms-racing the force-clamp budget. Per ADR-0019 / ADR-0023
-        // (clustering goal) and the centroid-anchoring rework.
-        var categorySum: [UUID: CGPoint] = [:]
-        var categoryCount: [UUID: Int] = [:]
+        let categoryAnchors = anchorPositions(for: graph.categories)
         let nodeCategoryIDs: [[UUID]] = graph.nodes.map { $0.categories.map { $0.id } }
-        for i in 0..<nodeCount {
-            for catID in nodeCategoryIDs[i] {
-                categorySum[catID, default: .zero].x += pos[i].x
-                categorySum[catID, default: .zero].y += pos[i].y
-                categoryCount[catID, default: 0] += 1
-            }
-        }
-        var categoryCentroids: [UUID: CGPoint] = [:]
-        categoryCentroids.reserveCapacity(categoryCount.count)
-        for (catID, count) in categoryCount {
-            let c = CGFloat(count)
-            let sum = categorySum[catID] ?? .zero
-            categoryCentroids[catID] = CGPoint(x: sum.x / c, y: sum.y / c)
-        }
 
-        // Gentle gravity toward the world origin.
-        for i in 0..<nodeCount {
+        // Gentle gravity toward the world origin — only for uncategorized
+        // nodes. Categorized nodes are anchored to their category slot via
+        // the post-integration blend below, which holds them against cross-
+        // category edge load. Applying central gravity to them too would
+        // pull every cluster's nodes inward and produce the inward-opening
+        // crescent distortion (the cluster's inner-facing nodes get yanked
+        // toward origin while outer-facing nodes stay put).
+        for i in 0..<nodeCount where nodeCategoryIDs[i].isEmpty {
             disp[i].x -= pos[i].x * gravityStrength
             disp[i].y -= pos[i].y * gravityStrength
         }
@@ -174,31 +190,29 @@ struct ForceDirectedLayout {
             pos[i].y += vel[i].y
         }
 
-        // Category cohesion blend (post-integration). For each node, lerp
-        // its position toward the average of its owned category centroids.
-        // Crucially this happens AFTER the force-clamp, so cluster cohesion
-        // doesn't have to fight the edge-spring budget — random cross-
-        // category edges can pull a node sideways within their clamped
-        // share, but this blend always reels it back toward home. Scaled
-        // by alpha so it dies along with the rest of the sim at settle.
+        // Category anchor blend (post-integration). For each categorized
+        // node, lerp its position toward the average of its owned anchor
+        // slots. Bypasses the force-clamp budget, so anchor cohesion holds
+        // regardless of how many cross-category edges pull sideways. Multi-
+        // category nodes settle on the boundary between their anchors,
+        // which is the right semantics. Scaled by alpha so it dies along
+        // with the rest of the sim at settle.
         let blend = categoryAnchorStrength * alphaCG
         if blend > 0 {
             for i in 0..<nodeCount {
                 let cats = nodeCategoryIDs[i]
                 if cats.isEmpty { continue }
-                var targetX: CGFloat = 0, targetY: CGFloat = 0, owned = 0
+                var sumX: CGFloat = 0, sumY: CGFloat = 0, owned = 0
                 for catID in cats {
-                    guard let c = categoryCentroids[catID] else { continue }
-                    targetX += c.x
-                    targetY += c.y
+                    guard let a = categoryAnchors[catID] else { continue }
+                    sumX += a.x
+                    sumY += a.y
                     owned += 1
                 }
                 if owned == 0 { continue }
                 let cn = CGFloat(owned)
-                let dx = (targetX / cn) - pos[i].x
-                let dy = (targetY / cn) - pos[i].y
-                pos[i].x += dx * blend
-                pos[i].y += dy * blend
+                pos[i].x += ((sumX / cn) - pos[i].x) * blend
+                pos[i].y += ((sumY / cn) - pos[i].y) * blend
             }
         }
 
@@ -213,18 +227,18 @@ struct ForceDirectedLayout {
 
     /// Establish initial positions for any node that doesn't already have one.
     /// Existing positions are preserved (so a graph addition doesn't scramble
-    /// the layout). New nodes spawn around `seedOrigin` (canvas-center coords)
-    /// so they land where the user is currently looking — except categorized
-    /// nodes, which are offset toward a per-category anchor so same-category
-    /// siblings start visibly clustered rather than emerging over several
-    /// seconds of cohesion-blend pull.
+    /// the layout). Categorized nodes spawn at their category's world-coord
+    /// anchor (one slot per category, evenly spaced around a circle of
+    /// radius `anchorRadius`); uncategorized nodes spawn around `seedOrigin`
+    /// (the viewport center) so they land where the user is currently
+    /// looking. The same anchor map is consulted by `advance` for the post-
+    /// integration blend, so a node spawns at its slot and the simulation
+    /// keeps it there.
     ///
-    /// Anchors are evenly spaced around a circle of radius `clusterSeparation`,
-    /// one slot per category. Categories are sorted by UUID for stability —
-    /// the same set of categories produces the same anchor layout across runs.
-    /// Even spacing matters: a hash-based angle (the prior approach) could
-    /// land two categories within a few degrees of each other, which placed
-    /// their clusters on top of each other from the start.
+    /// Note: categorized nodes ignore `seedOrigin`. The whole point of
+    /// fixed slots is that each category has a stable region — placing a
+    /// new categorized node at the user's current viewport would scatter
+    /// the cluster instead of joining it.
     ///
     /// Called by `LayoutEngine` on graph change.
     func seedPositions(
@@ -237,27 +251,12 @@ struct ForceDirectedLayout {
         for (id, pos) in previousPositions where knownIDs.contains(id) {
             positions[id] = pos
         }
-        let clusterSeparation: CGFloat = 600
-        // Build evenly-spaced angle slots for each category. Sort by UUID so
-        // the slot mapping is stable across runs (and across re-layouts of
-        // the same graph). Empty graphs / no-category cases skip this.
-        var categoryAngle: [UUID: CGFloat] = [:]
-        let sortedCategoryIDs = graph.categories.map { $0.id }
-            .sorted(by: { $0.uuidString < $1.uuidString })
-        if !sortedCategoryIDs.isEmpty {
-            let slotStep = (2 * .pi) / CGFloat(sortedCategoryIDs.count)
-            for (index, id) in sortedCategoryIDs.enumerated() {
-                categoryAngle[id] = CGFloat(index) * slotStep
-            }
-        }
+        let categoryAnchors = anchorPositions(for: graph.categories)
         for node in graph.nodes where positions[node.id] == nil {
             let anchor: CGPoint
             if let firstCategoryID = node.categories.first?.id,
-               let catAngle = categoryAngle[firstCategoryID] {
-                anchor = CGPoint(
-                    x: seedOrigin.x + cos(catAngle) * clusterSeparation,
-                    y: seedOrigin.y + sin(catAngle) * clusterSeparation
-                )
+               let categoryAnchor = categoryAnchors[firstCategoryID] {
+                anchor = categoryAnchor
             } else {
                 anchor = seedOrigin
             }
