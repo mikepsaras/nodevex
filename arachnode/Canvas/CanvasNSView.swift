@@ -26,6 +26,7 @@ final class CanvasNSView: NSView {
     private var lastGraphSignature: Int?
 
     private var edgeVisibility: EdgeVisibilityMode = .animated
+    private var lastResetLayoutVersion: Int = 0
     private var animationPhase: CGFloat = 0
     private var animationTimer: Timer?
 
@@ -75,7 +76,8 @@ final class CanvasNSView: NSView {
         graph: GraphSnapshot,
         selectedNodeIDs: Set<UUID>,
         modalFocusedNodeID: UUID?,
-        edgeVisibility: EdgeVisibilityMode
+        edgeVisibility: EdgeVisibilityMode,
+        resetLayoutVersion: Int
     ) {
         let signature = graphSignature(graph)
         if signature != lastGraphSignature {
@@ -85,6 +87,11 @@ final class CanvasNSView: NSView {
             lastGraphSignature = signature
         } else {
             self.graph = graph
+        }
+        if resetLayoutVersion != lastResetLayoutVersion {
+            layoutEngine.reseedAll(seedOrigin: currentViewportCenterWorld())
+            positions = layoutEngine.positions
+            lastResetLayoutVersion = resetLayoutVersion
         }
         if self.selectedNodeIDs != selectedNodeIDs {
             self.selectedNodeIDs = selectedNodeIDs

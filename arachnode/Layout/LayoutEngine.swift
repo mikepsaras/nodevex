@@ -97,4 +97,40 @@ final class LayoutEngine {
         // regardless of how energetic the sim was before/during the drag.
         alpha = alphaTarget
     }
+
+    /// Wipes positions and velocities, re-seeds every node around
+    /// `seedOrigin`, then runs the physics offline until convergence so the
+    /// caller sees nodes already clustered around their categories rather
+    /// than gradually drifting into place. Used by the Re-layout affordance.
+    func reseedAll(seedOrigin: CGPoint = .zero) {
+        guard let graph = lastGraph else { return }
+        positions = forceLayout.seedPositions(
+            graph: graph,
+            previousPositions: [:],
+            seedOrigin: seedOrigin
+        )
+        velocities = [:]
+
+        // Pre-converge offline. With the visible alpha-decay on the live
+        // simulation, the user would otherwise watch ~3-5 seconds of
+        // category-cluster pull fighting repulsion. 200 iterations here
+        // (~ms-scale even for a few hundred nodes) drains the settling
+        // time into a single sub-frame so the new layout reads as a
+        // deliberate snap, not a long drift.
+        var preAlpha: Double = 1.0
+        for _ in 0..<200 {
+            let result = forceLayout.advance(
+                graph: graph,
+                positions: positions,
+                velocities: velocities,
+                alpha: preAlpha
+            )
+            positions = result.positions
+            velocities = result.velocities
+            preAlpha = alphaTarget + (preAlpha - alphaTarget) * alphaDecay
+        }
+
+        // Live simulation continues at the floor — gentle drift, no jolt.
+        alpha = alphaTarget
+    }
 }
