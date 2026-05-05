@@ -2,13 +2,14 @@ import Foundation
 import CoreGraphics
 
 /// Owns the live position state and runs the force simulation. Force-directed
-/// is the only layout — alpha-decayed continuous physics, driven from
-/// CanvasNSView's animation timer.
+/// is the only layout — alpha-decayed physics that energizes on graph change,
+/// drag release, or re-layout, settles, and then halts. CanvasNSView's
+/// animation timer ticks while alpha is above `alphaSettledThreshold`.
 ///
 /// Drag is a perturbation, not a commit. While dragging, the dragged node's
 /// position is overridden to the cursor (so it pulls neighbors via the same
-/// forces). On release, the override clears and residual alpha carries
-/// everything back toward equilibrium — no separate animation phase.
+/// forces). On release, the override clears and a fresh alpha pulse carries
+/// everything back toward equilibrium before the sim sleeps.
 ///
 /// Always called from the main thread (CanvasNSView's timer + SwiftUI update
 /// path), but no `@MainActor` so it composes cleanly with NSView's timer
@@ -19,8 +20,10 @@ final class LayoutEngine {
 
     private(set) var alpha: Double = 0
     private let alphaDecay: Double = 0.96
-    private let alphaTarget: Double = 0.05
+    private let alphaTarget: Double = 0.0
+    private let alphaSettledThreshold: Double = 0.005
     private let alphaOnGraphChange: Double = 0.7
+    private let alphaOnDragRelease: Double = 0.3
 
     private var draggedNodeID: UUID?
     private var draggedNodePosition: CGPoint?
@@ -28,11 +31,11 @@ final class LayoutEngine {
     private let forceLayout = ForceDirectedLayout()
     private var lastGraph: GraphSnapshot?
 
-    /// True once a graph has been applied — physics has something to simulate.
-    /// CanvasNSView gates its animation timer on this. With `alphaTarget > 0`
-    /// the sim never fully sleeps, so this stays true for the lifetime of the
-    /// view; the gentle continuous drift is the source of the "fluid" feel.
-    var isActive: Bool { lastGraph != nil }
+    /// True while the sim has remaining energy to settle. Once alpha decays
+    /// below `alphaSettledThreshold`, this returns false and CanvasNSView
+    /// drops its animation tick — the graph stays frozen until the next graph
+    /// change, drag, or re-layout reseeds energy.
+    var isActive: Bool { lastGraph != nil && alpha > alphaSettledThreshold }
 
     /// True while a drag is in progress. CanvasNSView gates its timer on this
     /// too so drag overrides apply each tick.
@@ -58,7 +61,7 @@ final class LayoutEngine {
     /// One physics step. While dragging, the rest of the graph is frozen —
     /// only the dragged node updates (override to cursor). This preserves the
     /// pre-drag equilibrium so on release the node has its full drag distance
-    /// to traverse at the (low) floor velocity, producing a visible pull-back.
+    /// to traverse, producing a visible pull-back that decays to a stop.
     @discardableResult
     func tick() -> Bool {
         if let nodeID = draggedNodeID, let pos = draggedNodePosition {
@@ -93,9 +96,10 @@ final class LayoutEngine {
     func endDrag() {
         draggedNodeID = nil
         draggedNodePosition = nil
-        // Drop alpha to the floor so pull-back is at the gentle drift velocity
-        // regardless of how energetic the sim was before/during the drag.
-        alpha = alphaTarget
+        // Reset alpha to a fixed pull-back energy so the release feel is
+        // consistent regardless of how energetic the sim was before/during
+        // the drag. From here it decays toward zero and physics halts.
+        alpha = alphaOnDragRelease
     }
 
     /// Wipes positions and velocities, re-seeds every node around
@@ -130,7 +134,8 @@ final class LayoutEngine {
             preAlpha = alphaTarget + (preAlpha - alphaTarget) * alphaDecay
         }
 
-        // Live simulation continues at the floor — gentle drift, no jolt.
+        // Pre-converge already settled the layout — set alpha to its floor
+        // so the live tick stops immediately rather than drifting further.
         alpha = alphaTarget
     }
 }
