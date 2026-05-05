@@ -30,6 +30,14 @@ final class CanvasNSView: NSView {
     private var selectedNodeIDs: Set<UUID> = []
     private var lastGraphSignature: Int?
 
+    /// Snapshot of node positions before the most recent layout run.
+    /// Combined with `transitionStart` and `transitionDuration` to
+    /// interpolate from old positions to new on graph change, so the
+    /// re-layout reads as a smooth slide rather than an abrupt teleport.
+    private var previousPositions: [UUID: CGPoint] = [:]
+    private var transitionStart: Date?
+    private let transitionDuration: TimeInterval = 0.25
+
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
     private var appearanceMode: AppearanceMode = .dim
@@ -189,8 +197,11 @@ final class CanvasNSView: NSView {
 
     /// Re-run the layout pipeline against the current graph, sizing, and
     /// bounds, refreshing cached positions and radii. The renderer reads
-    /// from these caches, so this is the single point of layout truth.
+    /// from these caches via `effectivePositions`, which interpolates
+    /// between `previousPositions` and `positions` while a transition is
+    /// active.
     private func runLayout() {
+        let positionsBefore = positions
         let result = layoutController.computeLayout(
             graph: graph,
             sizing: nodeSizing,
@@ -199,6 +210,48 @@ final class CanvasNSView: NSView {
         lastLayoutResult = result
         positions = result.positions
         radii = computeRadii(graph: graph, sizing: nodeSizing)
+        // Trigger a transition only if there was a prior layout to slide
+        // from. First-time layout (empty positionsBefore) snaps into place
+        // without animation.
+        if !positionsBefore.isEmpty {
+            previousPositions = positionsBefore
+            transitionStart = Date()
+        } else {
+            previousPositions = [:]
+            transitionStart = nil
+        }
+    }
+
+    /// 0...1 progress through the active transition, or 1 when idle.
+    private var transitionProgress: CGFloat {
+        guard let start = transitionStart else { return 1 }
+        let elapsed = Date().timeIntervalSince(start)
+        return CGFloat(min(elapsed / transitionDuration, 1.0))
+    }
+
+    /// Position lookup used by both the renderer and hit-testing. During a
+    /// transition, interpolates each node from its previous position toward
+    /// its current position with smoothstep easing. Nodes that didn't exist
+    /// in the previous layout (newly added) appear at their final position
+    /// without animation. Nodes that were removed are silently dropped.
+    private var effectivePositions: [UUID: CGPoint] {
+        let t = transitionProgress
+        guard t < 1.0, !previousPositions.isEmpty else { return positions }
+        // Smoothstep ease-in-out: 3t² − 2t³.
+        let smoothT = t * t * (3 - 2 * t)
+        var result: [UUID: CGPoint] = [:]
+        result.reserveCapacity(positions.count)
+        for (id, current) in positions {
+            if let prev = previousPositions[id] {
+                result[id] = CGPoint(
+                    x: prev.x + (current.x - prev.x) * smoothT,
+                    y: prev.y + (current.y - prev.y) * smoothT
+                )
+            } else {
+                result[id] = current  // New node — appear at final position.
+            }
+        }
+        return result
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling
@@ -222,7 +275,7 @@ final class CanvasNSView: NSView {
             in: context,
             bounds: bounds,
             graph: graph,
-            positions: positions,
+            positions: effectivePositions,
             radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
@@ -253,10 +306,12 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Timer drives two things: arrow flow on animated edges, and the
-        // hover-reveal fade transitions. The deterministic layout doesn't
-        // tick — there's no continuous physics anymore.
-        if edgeVisibility == .animated || reveal != nil {
+        // Timer drives three things: arrow flow on animated edges, hover-
+        // reveal fade transitions, and the layout transition (interpolating
+        // positions on graph change). The deterministic layout itself
+        // doesn't tick — physics is gone.
+        let transitionActive = transitionStart != nil && transitionProgress < 1.0
+        if edgeVisibility == .animated || reveal != nil || transitionActive {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -275,7 +330,17 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
-            if self.edgeVisibility != .animated && self.reveal == nil {
+            // Layout transition completion — once we've crossed the
+            // duration, drop the previous-positions snapshot so subsequent
+            // frames return current positions directly without interpolation.
+            if self.transitionStart != nil, self.transitionProgress >= 1.0 {
+                self.transitionStart = nil
+                self.previousPositions = [:]
+            }
+            let transitionActive = self.transitionStart != nil
+            if self.edgeVisibility != .animated
+                && self.reveal == nil
+                && !transitionActive {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -475,10 +540,13 @@ final class CanvasNSView: NSView {
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
         // Click target = max(actual radius, 12pt floor). The floor keeps tiny
         // value-scaled nodes hittable; large nodes use their actual radius
-        // (no oversized invisible halo).
+        // (no oversized invisible halo). Hit-test uses interpolated positions
+        // during transitions so clicks land on the rendered circle, not the
+        // post-transition target.
+        let positionsForHit = effectivePositions
         let hitFloor: CGFloat = 12
         for node in graph.nodes.reversed() {
-            guard let pos = positions[node.id] else { continue }
+            guard let pos = positionsForHit[node.id] else { continue }
             let hitRadius = max(radii[node.id] ?? NodeSizingMode.defaultRadius, hitFloor)
             let dx = canvasPoint.x - pos.x
             let dy = canvasPoint.y - pos.y
