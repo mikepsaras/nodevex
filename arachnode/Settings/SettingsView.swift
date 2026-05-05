@@ -1,27 +1,35 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Bindable var store: TerminologyStore
+    @Bindable var terminologyStore: TerminologyStore
+    @Bindable var appearanceStore: AppearanceStore
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $appearanceStore.mode) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+            }
             Section("Inbound") {
-                TextField("Singular", text: $store.terminology.inboundSingular)
-                TextField("Plural", text: $store.terminology.inboundPlural)
+                TextField("Singular", text: $terminologyStore.terminology.inboundSingular)
+                TextField("Plural", text: $terminologyStore.terminology.inboundPlural)
             }
             Section("Outbound") {
-                TextField("Singular", text: $store.terminology.outboundSingular)
-                TextField("Plural", text: $store.terminology.outboundPlural)
+                TextField("Singular", text: $terminologyStore.terminology.outboundSingular)
+                TextField("Plural", text: $terminologyStore.terminology.outboundPlural)
             }
             Section("Valence") {
-                TextField("Positive", text: $store.terminology.valencePositive)
-                TextField("Negative", text: $store.terminology.valenceNegative)
-                TextField("Neutral", text: $store.terminology.valenceNeutral)
+                TextField("Positive", text: $terminologyStore.terminology.valencePositive)
+                TextField("Negative", text: $terminologyStore.terminology.valenceNegative)
+                TextField("Neutral", text: $terminologyStore.terminology.valenceNeutral)
             }
             HStack {
                 Spacer()
                 Button("Reset to defaults") {
-                    store.terminology = .default
+                    terminologyStore.terminology = .default
                 }
             }
         }

@@ -3,6 +3,7 @@ import SwiftData
 
 struct DocumentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appearanceMode) private var appearanceMode
     @Query(sort: \Node.createdAt, order: .reverse) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
@@ -40,6 +41,7 @@ struct DocumentView: View {
                 edgeVisibility: edgeVisibility,
                 modalFocusedNodeID: focusedNodeID,
                 onNodeFocus: { focusedNodeID = $0 },
+                appearanceMode: appearanceMode,
                 resetLayoutVersion: resetLayoutVersion
             )
             .overlay(alignment: .bottomLeading) {
@@ -56,6 +58,7 @@ struct DocumentView: View {
             }
         }
         .navigationTitle("Arachnode")
+        .dimWindowSurface(appearanceMode)
         .overlay {
             if let focusedNode {
                 NodeFocusView(node: focusedNode, onDismiss: { focusedNodeID = nil })

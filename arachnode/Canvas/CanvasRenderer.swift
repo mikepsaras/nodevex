@@ -13,6 +13,7 @@ protocol CanvasRenderer {
         revealOpacity: CGFloat,
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat,
-        zoom: CGFloat
+        zoom: CGFloat,
+        appearanceMode: AppearanceMode
     )
 }
