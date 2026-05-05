@@ -41,6 +41,7 @@ final class CanvasNSView: NSView {
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
     private var appearanceMode: AppearanceMode = .dim
+    private var showCategoryRegions: Bool = false
     private var animationPhase: CGFloat = 0
     private var animationTimer: Timer?
 
@@ -80,7 +81,8 @@ final class CanvasNSView: NSView {
         modalFocusedNodeID: UUID?,
         edgeVisibility: EdgeVisibilityMode,
         nodeSizing: NodeSizingMode,
-        appearanceMode: AppearanceMode
+        appearanceMode: AppearanceMode,
+        showCategoryRegions: Bool
     ) {
         let signature = graphSignature(graph)
         let sizingChanged = self.nodeSizing != nodeSizing
@@ -98,6 +100,7 @@ final class CanvasNSView: NSView {
         }
         self.edgeVisibility = edgeVisibility
         self.appearanceMode = appearanceMode
+        self.showCategoryRegions = showCategoryRegions
 
         if modalFocusedNodeID != lastModalFocusedNodeID {
             handleModalFocusChange(from: lastModalFocusedNodeID, to: modalFocusedNodeID)
@@ -276,6 +279,7 @@ final class CanvasNSView: NSView {
             bounds: bounds,
             graph: graph,
             positions: effectivePositions,
+            regions: lastLayoutResult.regions,
             radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
@@ -284,7 +288,8 @@ final class CanvasNSView: NSView {
             edgeVisibility: edgeVisibility,
             animationPhase: animationPhase,
             zoom: zoom,
-            appearanceMode: appearanceMode
+            appearanceMode: appearanceMode,
+            showRegions: showCategoryRegions
         )
     }
 

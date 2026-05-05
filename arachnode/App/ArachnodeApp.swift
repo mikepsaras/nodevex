@@ -5,12 +5,14 @@ import SwiftData
 struct ArachnodeApp: App {
     @State private var terminologyStore = TerminologyStore()
     @State private var appearanceStore = AppearanceStore()
+    @State private var layoutPreferenceStore = LayoutPreferenceStore()
 
     var body: some Scene {
         WindowGroup {
             DocumentView()
                 .environment(\.terminology, terminologyStore.terminology.resolved())
                 .environment(\.appearanceMode, appearanceStore.mode)
+                .environment(\.showCategoryRegions, layoutPreferenceStore.showCategoryRegions)
                 .preferredColorScheme(appearanceStore.mode.colorScheme)
         }
         // Ephemeral (in-memory) storage during early development — every app
@@ -27,7 +29,8 @@ struct ArachnodeApp: App {
         Settings {
             SettingsView(
                 terminologyStore: terminologyStore,
-                appearanceStore: appearanceStore
+                appearanceStore: appearanceStore,
+                layoutPreferenceStore: layoutPreferenceStore
             )
             // Settings is a sibling Scene — it doesn't inherit colorScheme
             // from WindowGroup, so re-apply it here.
