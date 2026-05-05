@@ -21,23 +21,27 @@ final class CanvasNSView: NSView {
     private let renderer: CanvasRenderer = CGCanvasRenderer()
     private let layoutController = LayoutController()
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
-    /// Mutable, in-progress layout. Holds per-cell ripple states that
-    /// advance one tick per animation frame; positions and radii surface
-    /// through it. The previous layout is replaced (not retained) on each
-    /// `runLayout` — but the new one is seeded with the previous frame's
-    /// positions so existing nodes ripple from where they were instead of
-    /// snapping to the packer's reset.
-    private var liveLayout: LiveLayoutState = .empty
+    /// Most recent layout snapshot — settled positions, radii, and the
+    /// per-cell region polygons. Positions update on graph change (via
+    /// `runLayout`) and on drag (via `mouseDragged`'s direct edits).
+    private var lastLayoutResult = LayoutResult.empty
     private var positions: [UUID: CGPoint] = [:]
-    /// Per-node display radius. Sourced from `liveLayout.radii` on each
-    /// layout run. Used by the renderer for circle/edge geometry and by
-    /// hit-testing for click target.
+    /// Per-node display radius. Sourced from `lastLayoutResult.radii` on
+    /// each layout run. Used by the renderer for circle/edge geometry
+    /// and by hit-testing for click target.
     private var radii: [UUID: CGFloat] = [:]
-    /// True while any cell's ripple is still active. Drives the animation
-    /// timer alongside edge animation and hover-reveal.
-    private var rippleActive: Bool = false
     private var selectedNodeIDs: Set<UUID> = []
     private var lastGraphSignature: Int?
+
+    /// Smooth-tween state for graph-change transitions. When `runLayout`
+    /// produces new positions, the previous frame's positions are saved
+    /// here and `transitionStart` is set; the renderer then interpolates
+    /// (smoothstep eased) between previous and current positions for
+    /// `transitionDuration` seconds. Drag edits don't tween — they
+    /// update `positions` directly so the cursor stays in sync.
+    private var previousPositions: [UUID: CGPoint] = [:]
+    private var transitionStart: Date?
+    private let transitionDuration: TimeInterval = 0.25
 
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
@@ -74,8 +78,10 @@ final class CanvasNSView: NSView {
     /// Drag bookkeeping. The cursor's canvas point at mouseDown, the
     /// dragged node's CategoryKey + radius captured then, and a flag for
     /// whether motion has crossed the click→drag threshold. The dragged
-    /// node's position is pinned in its cell's ripple state during the
-    /// drag (via `fixedIndex`); neighbors continue rippling around it.
+    /// node's position is updated directly each `mouseDragged` event;
+    /// any same-cell neighbor it overlaps gets bumped out of the way
+    /// (see `resolveBumps`). `sameCellNodeIDs` is captured at mouseDown
+    /// so the bump pass doesn't re-filter the graph each event.
     private struct DragState {
         let nodeID: UUID
         let cellKey: CategoryKey
@@ -83,6 +89,7 @@ final class CanvasNSView: NSView {
         let downCanvasPoint: CGPoint
         let originalNodePosition: CGPoint
         var didCrossThreshold: Bool
+        let sameCellNodeIDs: [UUID]
     }
     private var dragState: DragState?
     private let dragThreshold: CGFloat = 3
@@ -229,33 +236,61 @@ final class CanvasNSView: NSView {
     }
 
     /// Re-run the layout pipeline against the current graph, sizing, and
-    /// bounds. Builds a fresh `LiveLayoutState` (partition + pack +
-    /// initial ripple states) seeded with the previous frame's positions,
-    /// so existing nodes ripple from where they were rather than snapping
-    /// to the packer's reset. The animation timer drives the ripple from
-    /// here on; positions update each frame via `tickLayout`.
+    /// bounds. Seeds the controller with the previous frame's positions
+    /// so existing nodes start where they were (smooth handover) when
+    /// possible. After the run, snaps the new layout in place but starts
+    /// a smooth tween from the previous positions to the new ones over
+    /// `transitionDuration` seconds — that's the only animation between
+    /// successive layouts.
     private func runLayout() {
-        liveLayout = layoutController.prepareLayout(
+        let positionsBefore = positions
+        let result = layoutController.computeLayout(
             graph: graph,
             sizing: nodeSizing,
             bounds: layoutBounds(),
             initialPositions: positions
         )
-        positions = liveLayout.positions
-        radii = liveLayout.radii
-        rippleActive = !liveLayout.rippleStates.isEmpty
+        lastLayoutResult = result
+        radii = result.radii
+        positions = result.positions
+        if !positionsBefore.isEmpty {
+            previousPositions = positionsBefore
+            transitionStart = Date()
+        } else {
+            previousPositions = [:]
+            transitionStart = nil
+        }
     }
 
-    /// Advance the layout's ripple by one frame. Called from the animation
-    /// timer. Returns `true` while any cell is still active; once `false`,
-    /// the timer can stop ticking the ripple (other animations may still
-    /// keep the timer alive).
-    @discardableResult
-    private func tickLayout() -> Bool {
-        let active = layoutController.tick(&liveLayout)
-        positions = liveLayout.positions
-        rippleActive = active
-        return active
+    /// 0…1 progress through the active transition (1 when no transition).
+    private var transitionProgress: CGFloat {
+        guard let start = transitionStart else { return 1 }
+        let elapsed = Date().timeIntervalSince(start)
+        return CGFloat(min(elapsed / transitionDuration, 1.0))
+    }
+
+    /// Position lookup used by the renderer and hit-testing. Interpolates
+    /// from `previousPositions` to `positions` while a transition is
+    /// active; once the transition completes, returns `positions` as-is.
+    /// Nodes added in the new layout (no previous position) appear at
+    /// their final position immediately.
+    private var effectivePositions: [UUID: CGPoint] {
+        let t = transitionProgress
+        guard t < 1.0, !previousPositions.isEmpty else { return positions }
+        let smoothT = t * t * (3 - 2 * t)  // smoothstep ease-in-out
+        var result: [UUID: CGPoint] = [:]
+        result.reserveCapacity(positions.count)
+        for (id, current) in positions {
+            if let prev = previousPositions[id] {
+                result[id] = CGPoint(
+                    x: prev.x + (current.x - prev.x) * smoothT,
+                    y: prev.y + (current.y - prev.y) * smoothT
+                )
+            } else {
+                result[id] = current
+            }
+        }
+        return result
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling
@@ -279,8 +314,8 @@ final class CanvasNSView: NSView {
             in: context,
             bounds: bounds,
             graph: graph,
-            positions: positions,
-            regions: liveLayout.regions,
+            positions: effectivePositions,
+            regions: lastLayoutResult.regions,
             radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
@@ -313,9 +348,11 @@ final class CanvasNSView: NSView {
 
     private func updateAnimationTimer() {
         // Timer drives three things: arrow flow on animated edges, hover-
-        // reveal fade transitions, and the per-cell ripple animation
-        // (advances positions one tick per frame until each cell settles).
-        if edgeVisibility == .animated || reveal != nil || rippleActive {
+        // reveal fade transitions, and the layout transition tween
+        // (interpolating positions from previous to current after a
+        // graph change).
+        let transitionActive = transitionStart != nil && transitionProgress < 1.0
+        if edgeVisibility == .animated || reveal != nil || transitionActive {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -334,14 +371,17 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
-            // Layout ripple — each tick advances every cell's per-node
-            // physics by one step, with positions updating in place.
-            if self.rippleActive {
-                self.tickLayout()
+            // Layout transition completion — once we've crossed the
+            // duration, drop the previous-positions snapshot so subsequent
+            // frames return current positions directly.
+            if self.transitionStart != nil, self.transitionProgress >= 1.0 {
+                self.transitionStart = nil
+                self.previousPositions = [:]
             }
+            let transitionActive = self.transitionStart != nil
             if self.edgeVisibility != .animated
                 && self.reveal == nil
-                && !self.rippleActive {
+                && !transitionActive {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -403,19 +443,27 @@ final class CanvasNSView: NSView {
         pendingClickNodeID = hitID
         // Capture drag state if we hit a node — actual drag engagement
         // requires crossing the threshold in mouseDragged. The CategoryKey
-        // tells us which cell's ripple state to update during the drag.
+        // tells us which cell to clamp drag motion to; `sameCellNodeIDs`
+        // pre-computes the same-cell neighbor list so bump-resolution
+        // doesn't refilter the graph each mouseDragged event.
         if let hitID,
-           let pos = positions[hitID],
+           let pos = effectivePositions[hitID],
            let radius = radii[hitID],
            let node = graph.nodes.first(where: { $0.id == hitID }) {
             let cellKey = CategoryKey.from(categoryIDs: node.categories.map { $0.id })
+            let sameCellNodeIDs = graph.nodes.compactMap { other -> UUID? in
+                guard other.id != hitID else { return nil }
+                let key = CategoryKey.from(categoryIDs: other.categories.map { $0.id })
+                return key == cellKey ? other.id : nil
+            }
             dragState = DragState(
                 nodeID: hitID,
                 cellKey: cellKey,
                 nodeRadius: radius,
                 downCanvasPoint: canvasPoint,
                 originalNodePosition: pos,
-                didCrossThreshold: false
+                didCrossThreshold: false,
+                sameCellNodeIDs: sameCellNodeIDs
             )
         } else {
             dragState = nil
@@ -462,10 +510,13 @@ final class CanvasNSView: NSView {
         if !state.didCrossThreshold,
            (dx * dx + dy * dy) > dragThreshold * dragThreshold {
             state.didCrossThreshold = true
-            // Drag commits — abandon the click→focus path and suppress
-            // hover during the gesture.
+            // Drag commits — abandon the click→focus path, suppress
+            // hover, and abort any in-progress smooth-tween (drag is
+            // direct manipulation; the tween would compete).
             pendingClickNodeID = nil
             updateHover(target: nil)
+            transitionStart = nil
+            previousPositions = [:]
         }
 
         if state.didCrossThreshold {
@@ -474,30 +525,66 @@ final class CanvasNSView: NSView {
                 y: state.originalNodePosition.y + dy
             )
             // Clamp to the cell's polygon, inset by the node's radius so
-            // the entire circle stays inside its cell. Voronoi cells are
-            // convex, so a single iterative clamp converges quickly.
-            if let region = liveLayout.regions[state.cellKey] {
+            // the entire circle stays inside the cell.
+            if let region = lastLayoutResult.regions[state.cellKey] {
                 let clamped = region.clampedToInset(target, by: state.nodeRadius)
-                // Update the ripple state for this cell: pin the dragged
-                // node at the clamped position so neighbors repel from it
-                // each tick. We also bump alpha if it had decayed to zero
-                // so the ripple resumes ticking around the dragged node.
-                if var cellState = liveLayout.rippleStates[state.cellKey],
-                   let nodeIndex = cellState.ids.firstIndex(of: state.nodeID) {
-                    cellState.positions[nodeIndex] = clamped
-                    cellState.velocities[nodeIndex] = .zero
-                    cellState.fixedIndex = nodeIndex
-                    if cellState.alpha < 0.5 { cellState.alpha = 0.5 }
-                    liveLayout.rippleStates[state.cellKey] = cellState
-                }
                 positions[state.nodeID] = clamped
-                rippleActive = true
-                updateAnimationTimer()
+                // Bump-resolve same-cell neighbors out of the way if the
+                // dragged node now overlaps them. Single pass — chain
+                // reactions are unusual at typical cell sizes and node
+                // counts.
+                resolveBumps(
+                    draggedID: state.nodeID,
+                    draggedPos: clamped,
+                    draggedRadius: state.nodeRadius,
+                    sameCellNodeIDs: state.sameCellNodeIDs,
+                    in: region
+                )
                 needsDisplay = true
             }
         }
 
         dragState = state
+    }
+
+    /// Push same-cell neighbors that overlap the dragged node out of the
+    /// way. Each overlapping neighbor is moved to the closest non-overlap
+    /// point along the line from the dragged node, then clamped to the
+    /// cell so it doesn't escape. Non-overlapping neighbors stay put —
+    /// drag affects nothing it doesn't actually touch.
+    private func resolveBumps(
+        draggedID: UUID,
+        draggedPos: CGPoint,
+        draggedRadius: CGFloat,
+        sameCellNodeIDs: [UUID],
+        in region: Region
+    ) {
+        for neighborID in sameCellNodeIDs {
+            guard let neighborPos = positions[neighborID],
+                  let neighborRadius = radii[neighborID] else { continue }
+            let dx = neighborPos.x - draggedPos.x
+            let dy = neighborPos.y - draggedPos.y
+            let dist = sqrt(dx * dx + dy * dy)
+            let minDist = draggedRadius + neighborRadius
+            guard dist < minDist else { continue }
+            // Compute push direction. If the two are essentially
+            // coincident, push in an arbitrary direction so we still
+            // separate them.
+            let dirX: CGFloat
+            let dirY: CGFloat
+            if dist > 0.001 {
+                dirX = dx / dist
+                dirY = dy / dist
+            } else {
+                dirX = 1
+                dirY = 0
+            }
+            let bumped = CGPoint(
+                x: draggedPos.x + dirX * minDist,
+                y: draggedPos.y + dirY * minDist
+            )
+            positions[neighborID] = region.clampedToInset(bumped, by: neighborRadius)
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -506,19 +593,10 @@ final class CanvasNSView: NSView {
             pendingClickNodeID = nil
         }
 
-        // Drag end — release the pin and bump alpha so neighbors continue
-        // rippling for a moment after release (settling around the dropped
-        // node's new spot). Skip the click→focus path entirely.
-        if let state = dragState, state.didCrossThreshold {
-            if var cellState = liveLayout.rippleStates[state.cellKey] {
-                cellState.fixedIndex = nil
-                if cellState.alpha < 0.5 { cellState.alpha = 0.5 }
-                liveLayout.rippleStates[state.cellKey] = cellState
-                rippleActive = true
-                updateAnimationTimer()
-            }
-            return
-        }
+        // Drag-end is a no-op for the layout — positions stay where the
+        // user dropped them. Just skip the click→focus path so the modal
+        // doesn't fire after a drag.
+        if dragState?.didCrossThreshold == true { return }
 
         // Plain click — fire focus modal.
         guard let nodeID = pendingClickNodeID else { return }
@@ -637,12 +715,13 @@ final class CanvasNSView: NSView {
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
         // Click target = max(actual radius, 12pt floor). The floor keeps tiny
         // value-scaled nodes hittable; large nodes use their actual radius
-        // (no oversized invisible halo). `positions` is the most-current
-        // per-frame snapshot (updated by the ripple tick), so hit-tests
-        // land on the rendered circle even mid-animation.
+        // (no oversized invisible halo). Hit-test reads `effectivePositions`
+        // so clicks during a smooth-tween land on the rendered (interpolated)
+        // circle, not the post-tween target.
+        let positionsForHit = effectivePositions
         let hitFloor: CGFloat = 12
         for node in graph.nodes.reversed() {
-            guard let pos = positions[node.id] else { continue }
+            guard let pos = positionsForHit[node.id] else { continue }
             let hitRadius = max(radii[node.id] ?? NodeSizingMode.defaultRadius, hitFloor)
             let dx = canvasPoint.x - pos.x
             let dy = canvasPoint.y - pos.y

@@ -4,16 +4,14 @@ import CoreGraphics
 /// Per-cell physics simulator. Takes a set of nodes already inside (or
 /// near-inside) a `Region` polygon and runs a bounded ripple — mutual
 /// repulsion between members + a soft wall force keeping them inside the
-/// polygon — until the system settles.
+/// polygon — until the system settles. Synchronous and stateless: each
+/// call is a complete simulation start to finish.
 ///
-/// Two ways to use:
-/// - **One-shot:** `ripple(nodes:in:fixedNodeID:)` runs to completion and
-///   returns settled positions. Used by `LayoutController.computeLayout`
-///   for tests and any caller that wants a deterministic snapshot.
-/// - **Tick-driven:** `makeState(nodes:in:fixedNodeID:)` builds an
-///   initial `CellRippleState`; the caller advances it via
-///   `tick(_:)` once per frame. Used by `CanvasNSView` to drive the
-///   visible ripple animation.
+/// Used by `LayoutController.computeLayout` to spread each cell's
+/// packed-tight cluster across its cell so nodes fill the available
+/// space. The output is a settled snapshot — the canvas reads it once
+/// and animates between successive snapshots via tween, not via per-tick
+/// physics.
 ///
 /// The forces:
 /// - **Mutual repulsion** between every pair of nodes in the cell, inverse
@@ -24,13 +22,14 @@ import CoreGraphics
 ///   range boundary. Keeps nodes inside their cell without hard clamping
 ///   (which would create stuck-on-wall artifacts).
 ///
-/// Settling: alpha starts at 1.0 and decays each tick. The simulation is
-/// considered active as long as alpha stays above `alphaThreshold`.
-/// Velocity carries momentum across ticks with friction.
+/// Settling: alpha starts at 1.0 and decays each iteration. The loop exits
+/// when either `iterations` runs out or alpha drops below
+/// `alphaThreshold`. Velocity carries momentum across iterations with
+/// friction.
 ///
-/// `fixedNodeID` lets a single node be held in place during the ripple —
-/// used by the drag flow so the dragged node sits at the cursor while
-/// neighbors rearrange themselves around it.
+/// `fixedNodeID` lets a single node be held in place during the ripple.
+/// Useful when an external system pins a node and wants the rest of the
+/// cell to settle around it.
 struct CellRippleSimulator {
     let iterations: Int
     let alphaDecay: Double
@@ -72,120 +71,102 @@ struct CellRippleSimulator {
         self.maxStepPerTick = maxStepPerTick
     }
 
-    /// Build initial state for a tick-driven ripple. Positions and radii
-    /// are hoisted into parallel arrays once so the per-tick pair loop
-    /// avoids dictionary overhead. Velocities start at zero, alpha at 1.0.
-    func makeState(
-        nodes: [(id: UUID, position: CGPoint, radius: CGFloat)],
-        in region: Region,
-        fixedNodeID: UUID? = nil
-    ) -> CellRippleState {
-        let ids = nodes.map { $0.id }
-        let positions = nodes.map { $0.position }
-        let velocities = [CGPoint](repeating: .zero, count: nodes.count)
-        let radii = nodes.map { $0.radius }
-        let fixedIndex = fixedNodeID.flatMap { id in ids.firstIndex(of: id) }
-        return CellRippleState(
-            ids: ids,
-            positions: positions,
-            velocities: velocities,
-            radii: radii,
-            region: region,
-            alpha: 1.0,
-            fixedIndex: fixedIndex
-        )
-    }
-
-    /// Advance `state` by one tick. Returns `true` if the simulation is
-    /// still active afterward (alpha above threshold), `false` once it
-    /// settles. The caller should keep ticking until this returns `false`.
-    @discardableResult
-    func tick(_ state: inout CellRippleState) -> Bool {
-        guard state.alpha > alphaThreshold else { return false }
-        let count = state.positions.count
-        guard count > 0 else { state.alpha = 0; return false }
-        let alphaCG = CGFloat(state.alpha)
-        let polygon = state.region.polygon
-
-        var disp = [CGPoint](repeating: .zero, count: count)
-
-        // Mutual repulsion (inverse-square). O(N²) per cell — N is small
-        // (typically 3–15) so this is comfortably cheap.
-        for i in 0..<count {
-            for j in (i + 1)..<count {
-                let dx = state.positions[i].x - state.positions[j].x
-                let dy = state.positions[i].y - state.positions[j].y
-                let d2 = max(dx * dx + dy * dy, 1)
-                let d = sqrt(d2)
-                let f = repulsionStrength / d2
-                let fx = dx / d * f
-                let fy = dy / d * f
-                disp[i].x += fx; disp[i].y += fy
-                disp[j].x -= fx; disp[j].y -= fy
-            }
-        }
-
-        // Wall repulsion. For each node, walk the cell's edges; when the
-        // node is closer than `wallRange + radius` to an edge, accumulate
-        // a force that ramps from `wallStrength` at the edge to zero at
-        // the range boundary, directed away from the edge.
-        for i in 0..<count {
-            let r = state.radii[i]
-            let activationRange = wallRange + r
-            for ei in 0..<polygon.count {
-                let p1 = polygon[ei]
-                let p2 = polygon[(ei + 1) % polygon.count]
-                let near = nearestPointOnSegment(state.positions[i], p1, p2)
-                let dx = state.positions[i].x - near.x
-                let dy = state.positions[i].y - near.y
-                let d2 = dx * dx + dy * dy
-                let d = sqrt(max(d2, 1e-6))
-                if d < activationRange {
-                    let ramp = (activationRange - d) / activationRange
-                    let f = wallStrength * ramp
-                    disp[i].x += dx / d * f
-                    disp[i].y += dy / d * f
-                }
-            }
-        }
-
-        // Integrate. Velocity carries momentum with friction; cap per-
-        // tick step to avoid blow-ups at very-tight initial pairs. The
-        // fixed node (if any) skips integration — drag pins it in place.
-        for i in 0..<count {
-            if i == state.fixedIndex { continue }
-            state.velocities[i].x = state.velocities[i].x * (1 - velocityDecay) + disp[i].x * alphaCG
-            state.velocities[i].y = state.velocities[i].y * (1 - velocityDecay) + disp[i].y * alphaCG
-            let mag = sqrt(state.velocities[i].x * state.velocities[i].x + state.velocities[i].y * state.velocities[i].y)
-            if mag > maxStepPerTick {
-                let scale = maxStepPerTick / mag
-                state.velocities[i].x *= scale
-                state.velocities[i].y *= scale
-            }
-            state.positions[i].x += state.velocities[i].x
-            state.positions[i].y += state.velocities[i].y
-        }
-
-        state.alpha *= alphaDecay
-        return state.alpha > alphaThreshold
-    }
-
-    /// One-shot convenience. Builds initial state, ticks until settled or
-    /// `iterations` exhausted, returns the resulting positions keyed by
-    /// node ID. Used by the deterministic test path and by
-    /// `LayoutController.computeLayout` (which does sync ripple to keep
-    /// its public API non-streaming).
+    /// Run the simulation to completion (or until alpha decays below
+    /// threshold). Returns the final settled positions per node ID.
     func ripple(
         nodes: [(id: UUID, position: CGPoint, radius: CGFloat)],
         in region: Region,
         fixedNodeID: UUID? = nil
     ) -> [UUID: CGPoint] {
         guard !nodes.isEmpty else { return [:] }
-        var state = makeState(nodes: nodes, in: region, fixedNodeID: fixedNodeID)
+        let count = nodes.count
+
+        // Hoist into ordinal-indexed arrays for the inner pair loop —
+        // dictionary lookups would dominate the per-tick budget at any
+        // realistic cell size.
+        var pos = [CGPoint]()
+        var vel = [CGPoint](repeating: .zero, count: count)
+        let rad = nodes.map { $0.radius }
+        let ids = nodes.map { $0.id }
+        pos.reserveCapacity(count)
+        for n in nodes { pos.append(n.position) }
+
+        let fixedIndex = fixedNodeID.flatMap { id in ids.firstIndex(of: id) }
+        let polygon = region.polygon
+
+        var alpha = 1.0
         for _ in 0..<iterations {
-            if !tick(&state) { break }
+            if alpha < alphaThreshold { break }
+            let alphaCG = CGFloat(alpha)
+
+            var disp = [CGPoint](repeating: .zero, count: count)
+
+            // Mutual repulsion (inverse-square). O(N²) per cell — N is
+            // small (typically 3–15) so this is comfortably cheap.
+            for i in 0..<count {
+                for j in (i + 1)..<count {
+                    let dx = pos[i].x - pos[j].x
+                    let dy = pos[i].y - pos[j].y
+                    let d2 = max(dx * dx + dy * dy, 1)
+                    let d = sqrt(d2)
+                    let f = repulsionStrength / d2
+                    let fx = dx / d * f
+                    let fy = dy / d * f
+                    disp[i].x += fx; disp[i].y += fy
+                    disp[j].x -= fx; disp[j].y -= fy
+                }
+            }
+
+            // Wall repulsion. For each node, walk the cell's edges; when
+            // the node is closer than `wallRange + radius` to an edge,
+            // accumulate a force that ramps from `wallStrength` at the
+            // edge to zero at the range boundary, directed away from the
+            // edge.
+            for i in 0..<count {
+                let r = rad[i]
+                let activationRange = wallRange + r
+                for ei in 0..<polygon.count {
+                    let p1 = polygon[ei]
+                    let p2 = polygon[(ei + 1) % polygon.count]
+                    let near = nearestPointOnSegment(pos[i], p1, p2)
+                    let dx = pos[i].x - near.x
+                    let dy = pos[i].y - near.y
+                    let d2 = dx * dx + dy * dy
+                    let d = sqrt(max(d2, 1e-6))
+                    if d < activationRange {
+                        let ramp = (activationRange - d) / activationRange
+                        let f = wallStrength * ramp
+                        disp[i].x += dx / d * f
+                        disp[i].y += dy / d * f
+                    }
+                }
+            }
+
+            // Integrate. Velocity carries momentum with friction; cap
+            // per-tick step to avoid blow-ups at very-tight initial pairs.
+            for i in 0..<count {
+                if i == fixedIndex { continue }
+                vel[i].x = vel[i].x * (1 - velocityDecay) + disp[i].x * alphaCG
+                vel[i].y = vel[i].y * (1 - velocityDecay) + disp[i].y * alphaCG
+                let mag = sqrt(vel[i].x * vel[i].x + vel[i].y * vel[i].y)
+                if mag > maxStepPerTick {
+                    let scale = maxStepPerTick / mag
+                    vel[i].x *= scale
+                    vel[i].y *= scale
+                }
+                pos[i].x += vel[i].x
+                pos[i].y += vel[i].y
+            }
+
+            alpha *= alphaDecay
         }
-        return state.positionsByID
+
+        var result: [UUID: CGPoint] = [:]
+        result.reserveCapacity(count)
+        for i in 0..<count {
+            result[ids[i]] = pos[i]
+        }
+        return result
     }
 
     /// Closest point on segment `[a, b]` to `p`. Used for wall-force
@@ -198,38 +179,5 @@ struct CellRippleSimulator {
         var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq
         t = max(0, min(1, t))
         return CGPoint(x: a.x + t * abx, y: a.y + t * aby)
-    }
-}
-
-/// Mutable state for a per-cell ripple, tickable by `CellRippleSimulator`.
-/// Stored externally (typically by `CanvasNSView`) and advanced one tick
-/// per animation frame until `alpha` drops below threshold.
-///
-/// Positions, velocities, and radii are parallel arrays indexed by the
-/// same `Int` (matching the `ids` array). The pair loop in `tick(_:)`
-/// reads them by ordinal index — fast — and the dict-keyed
-/// `positionsByID` accessor materializes the per-frame snapshot the
-/// renderer + hit-test paths consume.
-struct CellRippleState {
-    let ids: [UUID]
-    var positions: [CGPoint]
-    var velocities: [CGPoint]
-    let radii: [CGFloat]
-    let region: Region
-    var alpha: Double
-    /// Index into `ids` of a node held fixed during the ripple (the
-    /// dragged node, when there is one). Pinning by index, not UUID,
-    /// avoids per-tick lookup.
-    var fixedIndex: Int?
-
-    /// Snapshot of current positions keyed by UUID. Allocates a fresh
-    /// dictionary — call once per frame, not per pair.
-    var positionsByID: [UUID: CGPoint] {
-        var result: [UUID: CGPoint] = [:]
-        result.reserveCapacity(ids.count)
-        for i in 0..<ids.count {
-            result[ids[i]] = positions[i]
-        }
-        return result
     }
 }
