@@ -1,35 +1,28 @@
 import Foundation
 import CoreGraphics
 
-/// Top-level layout pipeline orchestrator. Three synchronous, deterministic
+/// Top-level layout pipeline orchestrator. Two synchronous, deterministic
 /// stages — same graph + same bounds always produces the same `LayoutResult`:
 ///
 /// 1. **Partition** (`RegionPartitioner`) divides the layout bounds among
 ///    the `CategoryKey`s actually present in the graph.
 /// 2. **Pack** (`CirclePacker`) places nodes tangent at the centroid of
 ///    each cell.
-/// 3. **Ripple** (`CellRippleSimulator`) spreads each cluster out within
-///    its cell using mutual repulsion + soft wall force, so nodes fill
-///    the cell instead of clumping at the centroid.
 ///
-/// All three stages run synchronously to completion. The canvas reads the
-/// resulting `LayoutResult` and animates the visual transition between
-/// frames via a smooth tween — there's no live ripple animation. Drag
-/// interactions update positions directly through a separate path
-/// (`CanvasNSView.mouseDragged`), bypassing this pipeline.
+/// Nodes settle at the packer's tight tangent cluster at the cell
+/// centroid. No spreading or fill-the-cell behavior — manual drag is the
+/// way to reposition nodes within their cell. The canvas tweens between
+/// successive `LayoutResult`s for visual continuity on graph changes.
 final class LayoutController {
     private let partitioner: RegionPartitioner
     private let packer: CirclePacker
-    private let rippler: CellRippleSimulator
 
     init(
         partitioner: RegionPartitioner = VoronoiPartitioner(),
-        packer: CirclePacker = FrontChainPacker(),
-        rippler: CellRippleSimulator = CellRippleSimulator()
+        packer: CirclePacker = FrontChainPacker()
     ) {
         self.partitioner = partitioner
         self.packer = packer
-        self.rippler = rippler
     }
 
     /// Run the partition + pack + ripple pipeline for the given graph and
@@ -65,33 +58,24 @@ final class LayoutController {
             radii[node.id] = radius
         }
 
-        // 3. Per-cell pack + sync ripple. The ripple settles each cluster
-        //    so the nodes spread within their cell instead of clumping at
-        //    the centroid. Runs to completion before returning — the
-        //    canvas tweens between successive results, it doesn't animate
-        //    the ripple itself.
+        // 3. Per-cell pack. Each cell's nodes are placed tangent at the
+        //    cell centroid — that's where new nodes spawn. Existing
+        //    positions (from `initialPositions`) are preserved when still
+        //    inside the node's current cell, so a node that's been
+        //    manually dragged keeps its placement across graph mutations.
+        //    A node that migrated to a different cell (category change)
+        //    snaps to the new cell's packer position.
         var positions: [UUID: CGPoint] = [:]
         positions.reserveCapacity(graph.nodes.count)
         for (key, nodes) in nodesByKey {
             guard let region = regions[key] else { continue }
             let packed = packer.pack(nodes: nodes, in: region)
-            let rippleInput = nodes.map { node -> (id: UUID, position: CGPoint, radius: CGFloat) in
-                // Smooth-continuity bias: if the node's previous position
-                // is still inside its (possibly reshaped) cell, start
-                // there so the new layout matches "where it was" instead
-                // of snapping to the packer's reset. If the previous
-                // position is outside the new cell (cell migration on
-                // category edit), fall back to the packer's choice — the
-                // packer places at the cell centroid, definitely inside.
+            for node in nodes {
                 let proposed = initialPositions[node.id] ?? packed[node.id] ?? region.centroid
                 let pos = region.contains(proposed)
                     ? proposed
                     : (packed[node.id] ?? region.centroid)
-                return (id: node.id, position: pos, radius: node.radius)
-            }
-            let rippled = rippler.ripple(nodes: rippleInput, in: region)
-            for (id, pos) in rippled {
-                positions[id] = pos
+                positions[node.id] = pos
             }
         }
 
