@@ -1,13 +1,13 @@
 //
-//  nodevexTests.swift
-//  nodevexTests
+//  arachnodeTests.swift
+//  arachnodeTests
 //
 //  Created by Mike on 4/5/26.
 //
 
 import Testing
 
-struct nodevexTests {
+struct arachnodeTests {
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.

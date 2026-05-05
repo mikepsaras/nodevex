@@ -1,7 +1,7 @@
 import Testing
 import SwiftData
 import Foundation
-@testable import nodevex
+@testable import arachnode
 
 /// Verifies that SwiftData's automatic undo/redo machinery rolls back
 /// model mutations when an UndoManager is attached to the context. This is

@@ -1,6 +1,6 @@
 import Testing
 import SwiftData
-@testable import nodevex
+@testable import arachnode
 
 @Suite("EdgeCommands")
 @MainActor

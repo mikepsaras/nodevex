@@ -50,7 +50,7 @@ struct DocumentView: View {
                 }
             }
         }
-        .navigationTitle("NodeVex")
+        .navigationTitle("Arachnode")
         .overlay {
             if let focusedNode {
                 NodeFocusView(node: focusedNode, onDismiss: { focusedNodeID = nil })
