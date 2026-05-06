@@ -19,20 +19,34 @@ struct RevealState {
 
 final class CanvasNSView: NSView {
     private let renderer: CanvasRenderer = CGCanvasRenderer()
-    private let layoutEngine = LayoutEngine()
+    private let layoutController = LayoutController()
     private var graph = GraphSnapshot(nodes: [], edges: [], categories: [])
+    /// Most recent layout snapshot — settled positions, radii, and the
+    /// per-cell region polygons. Positions update on graph change (via
+    /// `runLayout`) and on drag (via `mouseDragged`'s direct edits).
+    private var lastLayoutResult = LayoutResult.empty
     private var positions: [UUID: CGPoint] = [:]
-    /// Per-node display radius. Recomputed on every update() — driven by the
-    /// current `NodeSizingMode` and each node's intrinsic value. Used by the
-    /// renderer for circle/edge geometry and by hit-testing for click target.
+    /// Per-node display radius. Sourced from `lastLayoutResult.radii` on
+    /// each layout run. Used by the renderer for circle/edge geometry
+    /// and by hit-testing for click target.
     private var radii: [UUID: CGFloat] = [:]
     private var selectedNodeIDs: Set<UUID> = []
     private var lastGraphSignature: Int?
 
+    /// Smooth-tween state for graph-change transitions. When `runLayout`
+    /// produces new positions, the previous frame's positions are saved
+    /// here and `transitionStart` is set; the renderer then interpolates
+    /// (smoothstep eased) between previous and current positions for
+    /// `transitionDuration` seconds. Drag edits don't tween — they
+    /// update `positions` directly so the cursor stays in sync.
+    private var previousPositions: [UUID: CGPoint] = [:]
+    private var transitionStart: Date?
+    private let transitionDuration: TimeInterval = 0.25
+
     private var edgeVisibility: EdgeVisibilityMode = .animated
     private var nodeSizing: NodeSizingMode = .fixed
     private var appearanceMode: AppearanceMode = .dim
-    private var lastResetLayoutVersion: Int = 0
+    private var showCategoryRegions: Bool = false
     private var animationPhase: CGFloat = 0
     private var animationTimer: Timer?
 
@@ -56,24 +70,32 @@ final class CanvasNSView: NSView {
     private var trackingArea: NSTrackingArea?
     private var lastModalFocusedNodeID: UUID?
 
-    /// Node hit on mouseDown. Consumed on mouseUp to decide whether to open
-    /// the focus modal — cleared the moment a drag is detected so that a
-    /// click-then-drag doesn't *also* fire the modal on release.
+    /// Node hit on mouseDown. Consumed on mouseUp to fire `onNodeFocus`
+    /// for plain clicks (no modifiers). Cleared the moment a drag is
+    /// engaged so the click→focus path doesn't fire on drag-release.
     private var pendingClickNodeID: UUID?
 
-    /// Drag bookkeeping. The cursor's canvas-relative point at mouseDown,
-    /// the dragged node's position at that moment, and a flag for whether
-    /// motion has crossed the click→drag threshold.
+    /// Drag bookkeeping. The cursor's canvas point at mouseDown, the
+    /// dragged node's CategoryKey + radius captured then, and a flag for
+    /// whether motion has crossed the click→drag threshold. The dragged
+    /// node's position is updated directly each `mouseDragged` event;
+    /// any same-cell neighbor it overlaps gets bumped out of the way
+    /// (see `resolveBumps`). `sameCellNodeIDs` is captured at mouseDown
+    /// so the bump pass doesn't re-filter the graph each event.
     private struct DragState {
         let nodeID: UUID
+        let cellKey: CategoryKey
+        let nodeRadius: CGFloat
         let downCanvasPoint: CGPoint
         let originalNodePosition: CGPoint
         var didCrossThreshold: Bool
+        let sameCellNodeIDs: [UUID]
     }
     private var dragState: DragState?
     private let dragThreshold: CGFloat = 3
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         animationTimer?.invalidate()
         hoverDelayTimer?.invalidate()
     }
@@ -85,31 +107,25 @@ final class CanvasNSView: NSView {
         edgeVisibility: EdgeVisibilityMode,
         nodeSizing: NodeSizingMode,
         appearanceMode: AppearanceMode,
-        resetLayoutVersion: Int
+        showCategoryRegions: Bool
     ) {
         let signature = graphSignature(graph)
-        if signature != lastGraphSignature {
+        let sizingChanged = self.nodeSizing != nodeSizing
+        let needsRelayout = signature != lastGraphSignature || sizingChanged
+        if needsRelayout {
             self.graph = graph
-            layoutEngine.applyGraphChange(graph, seedOrigin: currentViewportCenterWorld())
-            self.positions = layoutEngine.positions
+            self.nodeSizing = nodeSizing
+            runLayout()
             lastGraphSignature = signature
         } else {
             self.graph = graph
-        }
-        if resetLayoutVersion != lastResetLayoutVersion {
-            layoutEngine.reseedAll(seedOrigin: currentViewportCenterWorld())
-            positions = layoutEngine.positions
-            lastResetLayoutVersion = resetLayoutVersion
         }
         if self.selectedNodeIDs != selectedNodeIDs {
             self.selectedNodeIDs = selectedNodeIDs
         }
         self.edgeVisibility = edgeVisibility
-        self.nodeSizing = nodeSizing
         self.appearanceMode = appearanceMode
-        // Recompute every update — value and sizing-mode changes don't shift
-        // graphSignature, so the renderer needs a fresh map each time.
-        self.radii = computeRadii(graph: graph, sizing: nodeSizing)
+        self.showCategoryRegions = showCategoryRegions
 
         if modalFocusedNodeID != lastModalFocusedNodeID {
             handleModalFocusChange(from: lastModalFocusedNodeID, to: modalFocusedNodeID)
@@ -118,6 +134,55 @@ final class CanvasNSView: NSView {
 
         updateAnimationTimer()
         needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Re-register screen-change observers for the new window. Removing
+        // any prior observers first keeps things clean if the view is moved
+        // between windows.
+        NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(displayMayHaveChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(displayMayHaveChanged),
+                name: NSWindow.didChangeScreenNotification,
+                object: window
+            )
+        }
+        // Now that the view has a screen, size the document to match the
+        // screen's visibleFrame so the canvas hugs the layout (no empty
+        // padding for zoom-out to reveal). Then recompute layout against
+        // those same bounds.
+        syncCanvasSize()
+        if !graph.nodes.isEmpty {
+            runLayout()
+            needsDisplay = true
+        }
+    }
+
+    /// Fired when the window moves to a different screen, or when display
+    /// hardware/configuration changes. Resize the canvas to match the new
+    /// screen, then recompute layout against the new bounds.
+    @objc private func displayMayHaveChanged() {
+        syncCanvasSize()
+        guard !graph.nodes.isEmpty else { return }
+        runLayout()
+        needsDisplay = true
+    }
+
+    /// Pass the current `layoutBounds().size` down to the enclosing
+    /// `CanvasScrollView` as the document size. Idempotent — the scroll
+    /// view skips no-op assignments.
+    private func syncCanvasSize() {
+        guard let scrollView = enclosingScrollView as? CanvasScrollView else { return }
+        scrollView.setCanvasSize(layoutBounds().size)
     }
 
     private func handleModalFocusChange(from oldID: UUID?, to newID: UUID?) {
@@ -154,16 +219,78 @@ final class CanvasNSView: NSView {
         }
     }
 
-    /// Center of the visible scroll-view region in canvas-center-relative
-    /// coords. Used as the seed origin for newly-created nodes so they spawn
-    /// where the user is currently looking, not at the canvas origin.
-    private func currentViewportCenterWorld() -> CGPoint {
-        guard let scrollView = enclosingScrollView else { return .zero }
-        let visible = scrollView.documentVisibleRect
-        return CGPoint(
-            x: visible.midX - bounds.midX,
-            y: visible.midY - bounds.midY
+    /// Layout extent — the active screen's visible frame, centered at the
+    /// world origin. Display-pegged: the layout fills the screen at its
+    /// native dimensions regardless of the current window size, and only
+    /// re-runs when the screen itself changes (different display or
+    /// display-config event), not on window resize.
+    private func layoutBounds() -> CGRect {
+        let size = window?.screen?.visibleFrame.size
+            ?? CGSize(width: 1500, height: 1500)
+        return CGRect(
+            x: -size.width / 2,
+            y: -size.height / 2,
+            width: size.width,
+            height: size.height
         )
+    }
+
+    /// Re-run the layout pipeline against the current graph, sizing, and
+    /// bounds. Seeds the controller with the previous frame's positions
+    /// so existing nodes start where they were (smooth handover) when
+    /// possible. After the run, snaps the new layout in place but starts
+    /// a smooth tween from the previous positions to the new ones over
+    /// `transitionDuration` seconds — that's the only animation between
+    /// successive layouts.
+    private func runLayout() {
+        let positionsBefore = positions
+        let result = layoutController.computeLayout(
+            graph: graph,
+            sizing: nodeSizing,
+            bounds: layoutBounds(),
+            initialPositions: positions
+        )
+        lastLayoutResult = result
+        radii = result.radii
+        positions = result.positions
+        if !positionsBefore.isEmpty {
+            previousPositions = positionsBefore
+            transitionStart = Date()
+        } else {
+            previousPositions = [:]
+            transitionStart = nil
+        }
+    }
+
+    /// 0…1 progress through the active transition (1 when no transition).
+    private var transitionProgress: CGFloat {
+        guard let start = transitionStart else { return 1 }
+        let elapsed = Date().timeIntervalSince(start)
+        return CGFloat(min(elapsed / transitionDuration, 1.0))
+    }
+
+    /// Position lookup used by the renderer and hit-testing. Interpolates
+    /// from `previousPositions` to `positions` while a transition is
+    /// active; once the transition completes, returns `positions` as-is.
+    /// Nodes added in the new layout (no previous position) appear at
+    /// their final position immediately.
+    private var effectivePositions: [UUID: CGPoint] {
+        let t = transitionProgress
+        guard t < 1.0, !previousPositions.isEmpty else { return positions }
+        let smoothT = t * t * (3 - 2 * t)  // smoothstep ease-in-out
+        var result: [UUID: CGPoint] = [:]
+        result.reserveCapacity(positions.count)
+        for (id, current) in positions {
+            if let prev = previousPositions[id] {
+                result[id] = CGPoint(
+                    x: prev.x + (current.x - prev.x) * smoothT,
+                    y: prev.y + (current.y - prev.y) * smoothT
+                )
+            } else {
+                result[id] = current
+            }
+        }
+        return result
     }
 
     /// Look up which node (if any) the cursor is currently over by sampling
@@ -187,7 +314,8 @@ final class CanvasNSView: NSView {
             in: context,
             bounds: bounds,
             graph: graph,
-            positions: positions,
+            positions: effectivePositions,
+            regions: lastLayoutResult.regions,
             radii: radii,
             selectedIDs: selectedNodeIDs,
             highlightedNodeID: highlightedNodeID,
@@ -196,7 +324,8 @@ final class CanvasNSView: NSView {
             edgeVisibility: edgeVisibility,
             animationPhase: animationPhase,
             zoom: zoom,
-            appearanceMode: appearanceMode
+            appearanceMode: appearanceMode,
+            showRegions: showCategoryRegions
         )
     }
 
@@ -218,10 +347,12 @@ final class CanvasNSView: NSView {
     }
 
     private func updateAnimationTimer() {
-        // Timer drives three things: arrow flow on animated edges, hover-reveal
-        // fade transitions, and the continuous force-physics tick (which also
-        // applies the drag override). Run while any of them is active.
-        if edgeVisibility == .animated || reveal != nil || layoutEngine.isActive || layoutEngine.isDragging {
+        // Timer drives three things: arrow flow on animated edges, hover-
+        // reveal fade transitions, and the layout transition tween
+        // (interpolating positions from previous to current after a
+        // graph change).
+        let transitionActive = transitionStart != nil && transitionProgress < 1.0
+        if edgeVisibility == .animated || reveal != nil || transitionActive {
             startAnimationTimer()
         } else {
             stopAnimationTimer()
@@ -240,15 +371,17 @@ final class CanvasNSView: NSView {
             // which reads as a visible jump.
             self.animationPhase += 0.005
             self.advanceRevealTransitions()
-            // One physics step per frame. Pulls dragged nodes via overrides,
-            // applies forces to the rest, decays alpha. When alpha settles
-            // and other animation reasons go quiet, the timer self-stops.
-            self.layoutEngine.tick()
-            self.positions = self.layoutEngine.positions
-            // If physics finished settling but other animations are still
-            // active, we keep ticking; if everything's quiet, recompute the
-            // timer state.
-            if !self.layoutEngine.isActive && !self.layoutEngine.isDragging && self.edgeVisibility != .animated && self.reveal == nil {
+            // Layout transition completion — once we've crossed the
+            // duration, drop the previous-positions snapshot so subsequent
+            // frames return current positions directly.
+            if self.transitionStart != nil, self.transitionProgress >= 1.0 {
+                self.transitionStart = nil
+                self.previousPositions = [:]
+            }
+            let transitionActive = self.transitionStart != nil
+            if self.edgeVisibility != .animated
+                && self.reveal == nil
+                && !transitionActive {
                 self.stopAnimationTimer()
             }
             self.needsDisplay = true
@@ -307,23 +440,38 @@ final class CanvasNSView: NSView {
         let hitID = findNodeID(at: canvasPoint)
         let modifiers = event.modifierFlags
 
-        // Track click + drag intent in parallel. mouseUp picks the right one
-        // based on whether motion crossed the drag threshold.
         pendingClickNodeID = hitID
-        if let hitID, let originalPos = positions[hitID] {
+        // Capture drag state if we hit a node — actual drag engagement
+        // requires crossing the threshold in mouseDragged. The CategoryKey
+        // tells us which cell to clamp drag motion to; `sameCellNodeIDs`
+        // pre-computes the same-cell neighbor list so bump-resolution
+        // doesn't refilter the graph each mouseDragged event.
+        if let hitID,
+           let pos = effectivePositions[hitID],
+           let radius = radii[hitID],
+           let node = graph.nodes.first(where: { $0.id == hitID }) {
+            let cellKey = CategoryKey.from(categoryIDs: node.categories.map { $0.id })
+            let sameCellNodeIDs = graph.nodes.compactMap { other -> UUID? in
+                guard other.id != hitID else { return nil }
+                let key = CategoryKey.from(categoryIDs: other.categories.map { $0.id })
+                return key == cellKey ? other.id : nil
+            }
             dragState = DragState(
                 nodeID: hitID,
+                cellKey: cellKey,
+                nodeRadius: radius,
                 downCanvasPoint: canvasPoint,
-                originalNodePosition: originalPos,
-                didCrossThreshold: false
+                originalNodePosition: pos,
+                didCrossThreshold: false,
+                sameCellNodeIDs: sameCellNodeIDs
             )
         } else {
             dragState = nil
         }
 
-        // Plain click no longer selects — it opens the focus modal on mouseUp.
-        // Selection requires shift (add) or command (toggle). Click on empty
-        // canvas without a modifier still clears the selection.
+        // Plain click opens the focus modal (consumed in mouseUp).
+        // Selection requires shift (add) or command (toggle). Click on
+        // empty canvas without a modifier clears the selection.
         var newSelection = selectedNodeIDs
         if let hitID {
             if modifiers.contains(.shift) {
@@ -347,38 +495,96 @@ final class CanvasNSView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard var state = dragState else { return }
-        let cursorInView = convert(event.locationInWindow, from: nil)
-        // Clamp the cursor to the visible viewport in canvas-local coords so
-        // the dragged node sticks to the viewport edge if the cursor crosses it.
-        let clampedView = clampToVisibleViewport(cursorInView)
+
+        let pointInView = convert(event.locationInWindow, from: nil)
         let canvasPoint = CGPoint(
-            x: clampedView.x - bounds.midX,
-            y: clampedView.y - bounds.midY
+            x: pointInView.x - bounds.midX,
+            y: pointInView.y - bounds.midY
         )
         let dx = canvasPoint.x - state.downCanvasPoint.x
         let dy = canvasPoint.y - state.downCanvasPoint.y
-        let nodePosition = CGPoint(
-            x: state.originalNodePosition.x + dx,
-            y: state.originalNodePosition.y + dy
-        )
 
-        if !state.didCrossThreshold && (dx * dx + dy * dy) > dragThreshold * dragThreshold {
+        // Engagement: only commit to drag once the cursor has moved past
+        // the threshold. Below threshold we treat it as a still-pending
+        // click so a slightly-jittery click doesn't accidentally drag.
+        if !state.didCrossThreshold,
+           (dx * dx + dy * dy) > dragThreshold * dragThreshold {
             state.didCrossThreshold = true
-            // Crossing the threshold means this is a drag, not a click.
-            // Cancel the modal-open path and notify the engine so the dragged
-            // node's position is overridden each tick while neighbors react
-            // to it via the regular forces.
+            // Drag commits — abandon the click→focus path, suppress
+            // hover, and abort any in-progress smooth-tween (drag is
+            // direct manipulation; the tween would compete).
             pendingClickNodeID = nil
-            layoutEngine.startDrag(nodeID: state.nodeID, position: nodePosition)
-            // Suppress hover/highlight while dragging.
             updateHover(target: nil)
-        } else if state.didCrossThreshold {
-            layoutEngine.updateDrag(position: nodePosition)
+            transitionStart = nil
+            previousPositions = [:]
+        }
+
+        if state.didCrossThreshold {
+            let target = CGPoint(
+                x: state.originalNodePosition.x + dx,
+                y: state.originalNodePosition.y + dy
+            )
+            // Clamp to the cell's polygon, inset by the node's radius so
+            // the entire circle stays inside the cell.
+            if let region = lastLayoutResult.regions[state.cellKey] {
+                let clamped = region.clampedToInset(target, by: state.nodeRadius)
+                positions[state.nodeID] = clamped
+                // Bump-resolve same-cell neighbors out of the way if the
+                // dragged node now overlaps them. Single pass — chain
+                // reactions are unusual at typical cell sizes and node
+                // counts.
+                resolveBumps(
+                    draggedID: state.nodeID,
+                    draggedPos: clamped,
+                    draggedRadius: state.nodeRadius,
+                    sameCellNodeIDs: state.sameCellNodeIDs,
+                    in: region
+                )
+                needsDisplay = true
+            }
         }
 
         dragState = state
-        // Keep the timer awake so the drag override applies each tick.
-        updateAnimationTimer()
+    }
+
+    /// Push same-cell neighbors that overlap the dragged node out of the
+    /// way. Each overlapping neighbor is moved to the closest non-overlap
+    /// point along the line from the dragged node, then clamped to the
+    /// cell so it doesn't escape. Non-overlapping neighbors stay put —
+    /// drag affects nothing it doesn't actually touch.
+    private func resolveBumps(
+        draggedID: UUID,
+        draggedPos: CGPoint,
+        draggedRadius: CGFloat,
+        sameCellNodeIDs: [UUID],
+        in region: Region
+    ) {
+        for neighborID in sameCellNodeIDs {
+            guard let neighborPos = positions[neighborID],
+                  let neighborRadius = radii[neighborID] else { continue }
+            let dx = neighborPos.x - draggedPos.x
+            let dy = neighborPos.y - draggedPos.y
+            let dist = sqrt(dx * dx + dy * dy)
+            let minDist = draggedRadius + neighborRadius
+            guard dist < minDist else { continue }
+            // Compute push direction. If the two are essentially
+            // coincident, push in an arbitrary direction so we still
+            // separate them.
+            let dirX: CGFloat
+            let dirY: CGFloat
+            if dist > 0.001 {
+                dirX = dx / dist
+                dirY = dy / dist
+            } else {
+                dirX = 1
+                dirY = 0
+            }
+            let bumped = CGPoint(
+                x: draggedPos.x + dirX * minDist,
+                y: draggedPos.y + dirY * minDist
+            )
+            positions[neighborID] = region.clampedToInset(bumped, by: neighborRadius)
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -387,13 +593,12 @@ final class CanvasNSView: NSView {
             pendingClickNodeID = nil
         }
 
-        if let state = dragState, state.didCrossThreshold {
-            // Drag end — clear the engine's fix and let residual alpha pull
-            // the node back toward force equilibrium.
-            layoutEngine.endDrag()
-            return
-        }
+        // Drag-end is a no-op for the layout — positions stay where the
+        // user dropped them. Just skip the click→focus path so the modal
+        // doesn't fire after a drag.
+        if dragState?.didCrossThreshold == true { return }
 
+        // Plain click — fire focus modal.
         guard let nodeID = pendingClickNodeID else { return }
         let modifiers = event.modifierFlags
         if modifiers.isDisjoint(with: [.shift, .command, .option]) {
@@ -401,21 +606,8 @@ final class CanvasNSView: NSView {
         }
     }
 
-    /// Clamp a point in this view's coords to the enclosing scroll view's
-    /// visible region. Used during drag so the dragged node sticks to the
-    /// viewport edge when the cursor goes past it.
-    private func clampToVisibleViewport(_ point: CGPoint) -> CGPoint {
-        guard let scrollView = enclosingScrollView else { return point }
-        let visibleRect = scrollView.contentView.bounds
-        return CGPoint(
-            x: min(max(point.x, visibleRect.minX), visibleRect.maxX),
-            y: min(max(point.y, visibleRect.minY), visibleRect.maxY)
-        )
-    }
-
     override func mouseMoved(with event: NSEvent) {
-        // Don't reveal during a drag — the user is busy with another gesture.
-        // (mouseMoved typically doesn't fire during a drag, but be explicit.)
+        // Suppress hover entirely while a drag gesture is engaged.
         if dragState?.didCrossThreshold == true {
             updateHover(target: nil)
             return
@@ -455,11 +647,8 @@ final class CanvasNSView: NSView {
             needsDisplay = true
         }
 
-        // Pointing-hand when the cursor is over a node OR while a drag is in
-        // flight (so the grab cue persists through the gesture, even though
-        // hover is suppressed during drag). Plain arrow otherwise.
-        let overNode = nodeID != nil || dragState?.didCrossThreshold == true
-        (overNode ? NSCursor.pointingHand : NSCursor.arrow).set()
+        // Pointing-hand when the cursor is over a node, plain arrow otherwise.
+        (nodeID != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
 
         // A reveal is already active (any source, any phase except modal-visible
         // which we excluded above). The user's hover target wins immediately —
@@ -526,10 +715,13 @@ final class CanvasNSView: NSView {
     private func findNodeID(at canvasPoint: CGPoint) -> UUID? {
         // Click target = max(actual radius, 12pt floor). The floor keeps tiny
         // value-scaled nodes hittable; large nodes use their actual radius
-        // (no oversized invisible halo).
+        // (no oversized invisible halo). Hit-test reads `effectivePositions`
+        // so clicks during a smooth-tween land on the rendered (interpolated)
+        // circle, not the post-tween target.
+        let positionsForHit = effectivePositions
         let hitFloor: CGFloat = 12
         for node in graph.nodes.reversed() {
-            guard let pos = positions[node.id] else { continue }
+            guard let pos = positionsForHit[node.id] else { continue }
             let hitRadius = max(radii[node.id] ?? NodeSizingMode.defaultRadius, hitFloor)
             let dx = canvasPoint.x - pos.x
             let dy = canvasPoint.y - pos.y
@@ -540,22 +732,15 @@ final class CanvasNSView: NSView {
         return nil
     }
 
-    private func computeRadii(graph: GraphSnapshot, sizing: NodeSizingMode) -> [UUID: CGFloat] {
-        var result: [UUID: CGFloat] = [:]
-        result.reserveCapacity(graph.nodes.count)
-        for node in graph.nodes {
-            result[node.id] = sizing.radius(forValue: node.value)
-        }
-        return result
-    }
-
     private func graphSignature(_ graph: GraphSnapshot) -> Int {
         // Build sets so the hash is independent of the array order @Query
-        // returns. Without this, a SwiftUI re-render that re-fetches edges
-        // in a different order would change the signature, fire a relayout,
-        // and shift node positions — that's the "node drifts when toggling
-        // edge visibility" blip.
-        let nodeIDs: Set<UUID> = Set(graph.nodes.map { $0.id })
+        // returns — a SwiftUI re-render that re-fetches edges in a different
+        // order would otherwise change the signature and trigger an
+        // unnecessary relayout. Node fingerprints include `value`, so when
+        // a user adjusts a node's value-slider in the modal (which can
+        // change its display radius under `.scaledByValue`), the signature
+        // moves and the layout re-runs.
+        let nodeFingerprints: Set<String> = Set(graph.nodes.map { "\($0.id):\($0.value)" })
         let categoryMemberships: Set<String> = Set(graph.nodes.flatMap { node in
             node.categories.map { "\(node.id):\($0.id)" }
         })
@@ -564,7 +749,7 @@ final class CanvasNSView: NSView {
         })
 
         var hasher = Hasher()
-        hasher.combine(nodeIDs)
+        hasher.combine(nodeFingerprints)
         hasher.combine(categoryMemberships)
         hasher.combine(edgeFingerprints)
         return hasher.finalize()

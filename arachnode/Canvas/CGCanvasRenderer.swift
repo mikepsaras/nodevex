@@ -33,6 +33,7 @@ final class CGCanvasRenderer: CanvasRenderer {
         bounds: CGRect,
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
+        regions: [CategoryKey: Region],
         radii: [UUID: CGFloat],
         selectedIDs: Set<UUID>,
         highlightedNodeID: UUID?,
@@ -41,12 +42,22 @@ final class CGCanvasRenderer: CanvasRenderer {
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat,
         zoom: CGFloat,
-        appearanceMode: AppearanceMode
+        appearanceMode: AppearanceMode,
+        showRegions: Bool
     ) {
         context.setFillColor(SemanticColors.AppKit.canvasBackground(for: appearanceMode).cgColor)
         context.fill(bounds)
 
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        // Optional category-region tints, drawn first so everything else
+        // (edges, nodes, labels) layers on top. Off by default; toggled in
+        // Settings → Layout → "Show category regions".
+        if showRegions {
+            for (key, region) in regions {
+                drawRegionTint(region, key: key, graph: graph, in: context, atCenter: center)
+            }
+        }
 
         // Edge rendering: when global mode is hidden, only edges connected to
         // a hover/modal-revealed node draw, and they animate at `revealOpacity`.
@@ -266,6 +277,73 @@ final class CGCanvasRenderer: CanvasRenderer {
         case .positive: SemanticColors.AppKit.edgePositive
         case .negative: SemanticColors.AppKit.edgeNegative
         case .neutral: SemanticColors.AppKit.edgeDefault
+        }
+    }
+
+    /// Fill a Voronoi cell polygon with a faint tint of its category color.
+    /// Combination cells (multi-category nodes) blend the constituent
+    /// category colors via simple sRGB averaging; uncategorized cells use
+    /// `secondaryLabelColor`. Alpha is intentionally low so the tint reads
+    /// as atmospheric backdrop rather than a competing visual layer.
+    private func drawRegionTint(
+        _ region: Region,
+        key: CategoryKey,
+        graph: GraphSnapshot,
+        in context: CGContext,
+        atCenter center: CGPoint
+    ) {
+        let polygon = region.polygon
+        guard polygon.count >= 3 else { return }
+        let color = regionColor(for: key, graph: graph).withAlphaComponent(0.08)
+        context.setFillColor(color.cgColor)
+        context.beginPath()
+        for (i, vertex) in polygon.enumerated() {
+            let canvasVertex = CGPoint(
+                x: center.x + vertex.x,
+                y: center.y + vertex.y
+            )
+            if i == 0 {
+                context.move(to: canvasVertex)
+            } else {
+                context.addLine(to: canvasVertex)
+            }
+        }
+        context.closePath()
+        context.fillPath()
+    }
+
+    /// Resolve a `CategoryKey` to a tint color. Single-category cells use
+    /// the category's display color; combinations average their constituents
+    /// in sRGB; uncategorized and `.empty` placeholder cells fall back to
+    /// a neutral gray.
+    private func regionColor(for key: CategoryKey, graph: GraphSnapshot) -> NSColor {
+        switch key {
+        case .uncategorized, .empty:
+            return .secondaryLabelColor
+        case .single(let id):
+            return graph.categories.first(where: { $0.id == id })?.nsDisplayColor
+                ?? .secondaryLabelColor
+        case .combination(let ids):
+            var rSum: CGFloat = 0
+            var gSum: CGFloat = 0
+            var bSum: CGFloat = 0
+            var count = 0
+            for id in ids {
+                guard let cat = graph.categories.first(where: { $0.id == id }) else { continue }
+                let nsColor = cat.nsDisplayColor.usingColorSpace(.sRGB) ?? cat.nsDisplayColor
+                rSum += nsColor.redComponent
+                gSum += nsColor.greenComponent
+                bSum += nsColor.blueComponent
+                count += 1
+            }
+            guard count > 0 else { return .secondaryLabelColor }
+            let n = CGFloat(count)
+            return NSColor(
+                srgbRed: rSum / n,
+                green: gSum / n,
+                blue: bSum / n,
+                alpha: 1
+            )
         }
     }
 

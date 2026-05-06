@@ -7,6 +7,7 @@ protocol CanvasRenderer {
         bounds: CGRect,
         graph: GraphSnapshot,
         positions: [UUID: CGPoint],
+        regions: [CategoryKey: Region],
         radii: [UUID: CGFloat],
         selectedIDs: Set<UUID>,
         highlightedNodeID: UUID?,
@@ -15,6 +16,7 @@ protocol CanvasRenderer {
         edgeVisibility: EdgeVisibilityMode,
         animationPhase: CGFloat,
         zoom: CGFloat,
-        appearanceMode: AppearanceMode
+        appearanceMode: AppearanceMode,
+        showRegions: Bool
     )
 }

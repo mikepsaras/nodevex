@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var terminologyStore: TerminologyStore
     @Bindable var appearanceStore: AppearanceStore
+    @Bindable var layoutPreferenceStore: LayoutPreferenceStore
 
     var body: some View {
         Form {
@@ -12,6 +13,9 @@ struct SettingsView: View {
                         Text(mode.label).tag(mode)
                     }
                 }
+            }
+            Section("Layout") {
+                Toggle("Show category regions", isOn: $layoutPreferenceStore.showCategoryRegions)
             }
             Section("Inbound") {
                 TextField("Singular", text: $terminologyStore.terminology.inboundSingular)

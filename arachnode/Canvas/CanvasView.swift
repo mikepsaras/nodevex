@@ -9,7 +9,7 @@ struct CanvasView: NSViewRepresentable {
     var modalFocusedNodeID: UUID?
     var onNodeFocus: (UUID) -> Void
     var appearanceMode: AppearanceMode
-    var resetLayoutVersion: Int
+    @Environment(\.showCategoryRegions) private var showCategoryRegions
     @Query(sort: \Node.createdAt, order: .forward) private var nodes: [Node]
     @Query private var edges: [Edge]
     @Query private var categories: [Category]
@@ -21,7 +21,11 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> CanvasScrollView {
         let scrollView = CanvasScrollView()
         scrollView.allowsMagnification = true
-        scrollView.minMagnification = 0.25
+        // minMagnification is recomputed dynamically by `CanvasScrollView`
+        // whenever the document or viewport size changes — see the
+        // `applyCanvasAndMagnification` logic. Keep an initial floor of
+        // 0.5× as a safe default before the first tile pass.
+        scrollView.minMagnification = 0.5
         scrollView.maxMagnification = 4.0
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
@@ -57,7 +61,7 @@ struct CanvasView: NSViewRepresentable {
             edgeVisibility: edgeVisibility,
             nodeSizing: nodeSizing,
             appearanceMode: appearanceMode,
-            resetLayoutVersion: resetLayoutVersion
+            showCategoryRegions: showCategoryRegions
         )
     }
 
@@ -70,12 +74,26 @@ struct CanvasView: NSViewRepresentable {
 }
 
 final class CanvasScrollView: NSScrollView {
-    /// Fixed 100k × 100k document area — effectively infinite at any
-    /// reasonable zoom level. Node positions are canvas-center-relative, so
-    /// the geometric midpoint is the world origin.
-    private let canvasSize = NSSize(width: 100_000, height: 100_000)
+    /// Document size in canvas-local coordinates. Defaults to a sensible
+    /// pre-attach value before the canvas determines the active screen's
+    /// visibleFrame. After the first `setCanvasSize(_:)`, the document
+    /// frame is sized to match the layout extent — so zooming-out can
+    /// never reveal empty canvas around the layout (the document IS the
+    /// layout area).
+    private var canvasSize = NSSize(width: 1500, height: 1000)
     private var isAdjusting = false
     private var hasAppliedInitialZoom = false
+
+    /// Update the document size in response to layout-bounds changes
+    /// (typically a display change, since `CanvasNSView.layoutBounds()`
+    /// reads the active screen's visibleFrame). Triggers a re-tile so
+    /// `minMagnification` is recomputed against the new size.
+    func setCanvasSize(_ size: NSSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        guard size != canvasSize else { return }
+        canvasSize = size
+        needsLayout = true
+    }
 
     override func tile() {
         super.tile()
@@ -91,13 +109,32 @@ final class CanvasScrollView: NSScrollView {
             documentView.frame.size = canvasSize
             documentView.needsDisplay = true
         }
+
+        // Compute the minimum magnification dynamically: at minimum zoom
+        // the document fills the viewport (or the viewport fills the
+        // document, when the window is bigger than the layout). Either
+        // way there's never empty canvas around the document at max
+        // zoom-out.
+        let viewportSize = contentView.frame.size
+        if viewportSize.width > 0, viewportSize.height > 0,
+           canvasSize.width > 0, canvasSize.height > 0 {
+            let fitWidth = viewportSize.width / canvasSize.width
+            let fitHeight = viewportSize.height / canvasSize.height
+            let computedMin = min(fitWidth, fitHeight)
+            // Floor at 0.1× to avoid pathological tiny values; allow >1×
+            // when the viewport exceeds the document (zoom IS the
+            // minimum in that case — the layout fills the viewport).
+            minMagnification = max(0.1, computedMin)
+            if magnification < minMagnification {
+                magnification = minMagnification
+            }
+        }
+
         if !hasAppliedInitialZoom {
-            magnification = 1.0
-            // Center the viewport on the canvas's geometric midpoint. Node
-            // positions are stored relative to canvas center, so without this
-            // the user sees the canvas's empty top-left corner on launch
-            // while every actual node sits behind the scroll boundary.
-            let viewportSize = contentView.frame.size
+            magnification = max(1.0, minMagnification)
+            // Center viewport on the document midpoint. Node positions
+            // are stored relative to the document's geometric center, so
+            // without this the user sees an empty corner on launch.
             let scrollX = canvasSize.width / 2 - viewportSize.width / 2
             let scrollY = canvasSize.height / 2 - viewportSize.height / 2
             contentView.scroll(to: NSPoint(x: max(0, scrollX), y: max(0, scrollY)))
